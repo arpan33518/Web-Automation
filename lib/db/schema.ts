@@ -11,10 +11,11 @@ export const users = pgTable('users', {
 export const workflows = pgTable('workflows', {
   id: varchar('id', { length: 256 }).primaryKey(), // NanoID or UUID
   name: text('name').notNull(),
-  userId: varchar('user_id', { length: 256 })
-    .references(() => users.id, { onDelete: 'cascade' })
-    .notNull(),
+  orgId: varchar('org_id', { length: 256 }).notNull(),
+  graph: text('graph'),
   active: boolean('active').default(false).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
+
+export type Workflow = typeof workflows.$inferSelect;

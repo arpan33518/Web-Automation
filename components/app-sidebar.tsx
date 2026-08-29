@@ -1,5 +1,6 @@
 import * as React from "react"
 import { OrganizationSwitcher, UserButton } from "@clerk/nextjs"
+import { auth } from "@clerk/nextjs/server"
 import { Plus } from "lucide-react"
 
 import {
@@ -13,10 +14,15 @@ import {
   SidebarMenu,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-
+import { listWorkflows } from "@/features/workflows/data"
+import { createWorkflowAction } from "@/features/workflows/actions"
+import { generateSlug } from "@/features/workflows/lib/generate-slug"
 import { WorkflowNav } from "@/features/workflows/components/workflow-nav"
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export async function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { orgId } = await auth()
+  const workflows = orgId ? await listWorkflows(orgId) : []
+
   return (
     <Sidebar variant="inset" collapsible="icon" className="border-r-0" {...props}>
       {/* Sidebar Header */}
@@ -49,14 +55,27 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           {/* Expanded Header Label */}
           <SidebarGroupLabel className="group-data-[state=collapsed]:hidden text-sm font-medium text-sidebar-foreground/75 px-2 flex items-center justify-between w-full h-8">
             <span>Workflows</span>
-            <button className="text-sidebar-foreground hover:bg-sidebar-accent rounded-md p-1 transition-colors flex items-center justify-center size-6">
-              <Plus className="size-4" />
-            </button>
+            <form
+              action={async () => {
+                "use server"
+                await createWorkflowAction(generateSlug())
+              }}
+            >
+              <button
+                type="submit"
+                className="text-sidebar-foreground hover:bg-sidebar-accent rounded-md p-1 transition-colors flex items-center justify-center size-6 cursor-pointer"
+              >
+                <Plus className="size-4" />
+              </button>
+            </form>
           </SidebarGroupLabel>
 
           <SidebarGroupContent className="mt-2">
             <SidebarMenu>
-              <WorkflowNav />
+              <WorkflowNav
+                workflows={workflows}
+                createWorkflowAction={createWorkflowAction}
+              />
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
