@@ -20,15 +20,15 @@ import {
   type DefaultEdgeOptions,
   type SmoothStepPathOptions,
 } from "@xyflow/react"
-import { useTheme } from "next-themes"
 
 import { StepNode } from "@/features/workflows/components/step-nodes"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
-import { cn } from "@/lib/utils"
 
-const nodeTypes: NodeTypes = {
-  step: StepNode,
-}
+import { useTheme } from "next-themes"
+
+const nodeTypes: NodeTypes = { step: StepNode }
+
+import { cn } from "@/lib/utils"
 
 export type WorkflowEdge = Edge & {
   pathOptions?: SmoothStepPathOptions
@@ -50,13 +50,9 @@ const initialNodes: StepNodeType[] = [
     id: "start",
     type: "step",
     position: { x: 150, y: 80 },
-    data: {
-      type: "start",
-      kind: "trigger",
-      title: "Start",
-      values: {},
-    },
+    data: { type: "start", kind: "trigger", title: "start", values: {} }
   },
+
 ]
 
 const initialEdges: WorkflowEdge[] = []
@@ -66,7 +62,7 @@ export interface WorkflowCanvasProps
   workflowId?: string
 }
 
-const emptySubscribe = () => () => {}
+const emptySubscribe = () => () => { }
 
 export function WorkflowCanvas({
   workflowId,
@@ -83,8 +79,7 @@ export function WorkflowCanvas({
     ? ((resolvedTheme as ColorMode) ?? "light")
     : "light"
 
-  const [nodes, _setNodes, onNodesChange] =
-    useNodesState<StepNodeType>(initialNodes)
+  const [nodes, _setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] =
     useEdgesState<WorkflowEdge>(initialEdges)
 
