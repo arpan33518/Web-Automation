@@ -6,20 +6,19 @@ import {
   Background,
   Controls,
   MiniMap,
-  addEdge,
-  useNodesState,
-  useEdgesState,
   ConnectionLineType,
-  Position,
-  type Connection,
   type Edge,
-  type Node,
   type NodeTypes,
   BackgroundVariant,
   type ColorMode,
   type DefaultEdgeOptions,
   type SmoothStepPathOptions,
 } from "@xyflow/react"
+import { Cursors, useLiveblocksFlow } from "@liveblocks/react-flow"
+
+import "@xyflow/react/dist/style.css";
+import "@liveblocks/react-ui/styles.css";
+import "@liveblocks/react-flow/styles.css";
 
 import { StepNode } from "@/features/workflows/components/step-nodes"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
@@ -79,28 +78,21 @@ export function WorkflowCanvas({
     ? ((resolvedTheme as ColorMode) ?? "light")
     : "light"
 
-  const [nodes, _setNodes, onNodesChange] = useNodesState(initialNodes)
-  const [edges, setEdges, onEdgesChange] =
-    useEdgesState<WorkflowEdge>(initialEdges)
-
-  const onConnect = React.useCallback(
-    (params: Connection) =>
-      setEdges((eds) =>
-        addEdge<WorkflowEdge>(
-          {
-            ...params,
-            type: "smoothstep",
-            style: { stroke: "var(--border)" },
-            pathOptions: {
-              borderRadius: 16,
-              offset: 20,
-            },
-          },
-          eds
-        )
-      ),
-    [setEdges]
-  )
+  const {
+    nodes,
+    edges,
+    onNodesChange,
+    onEdgesChange,
+    onConnect,
+    onDelete,
+  } = useLiveblocksFlow({
+    nodes: {
+      initial: initialNodes,
+    },
+    edges: {
+      initial: initialEdges,
+    },
+  })
 
   return (
     <div
@@ -110,11 +102,12 @@ export function WorkflowCanvas({
     >
       <ReactFlow
         nodeTypes={nodeTypes}
-        nodes={nodes}
-        edges={edges}
+        nodes={nodes || []}
+        edges={edges || []}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onDelete={onDelete}
         colorMode={colorMode}
         fitView
         maxZoom={1}
@@ -132,6 +125,7 @@ export function WorkflowCanvas({
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls />
         <MiniMap zoomable pannable />
+        <Cursors />
       </ReactFlow>
     </div>
   )
