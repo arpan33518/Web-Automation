@@ -5,6 +5,8 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
+import { RightSidebar } from "@/features/workflows/components/right-sidebar"
+import { WorkflowCanvas } from "@/features/workflows/components/workflow-canvas"
 
 interface WorkflowShellProps {
   workflowId: string
@@ -22,9 +24,7 @@ export function WorkflowShell({ workflowId }: WorkflowShellProps) {
         <ResizablePanelGroup orientation="vertical" className="size-full">
           {/* Top panel: canvas */}
           <ResizablePanel minSize="18rem">
-            <div className="flex size-full items-center justify-center p-4">
-              <span className="text-sm font-medium text-muted-foreground">Canvas</span>
-            </div>
+            <WorkflowCanvas workflowId={workflowId} />
           </ResizablePanel>
 
           <ResizableHandle />
@@ -41,11 +41,7 @@ export function WorkflowShell({ workflowId }: WorkflowShellProps) {
       <ResizableHandle />
 
       {/* Right panel: inspector */}
-      <ResizablePanel defaultSize="16rem" minSize="14rem" maxSize="36rem">
-        <div className="flex size-full items-center justify-center p-4">
-          <span className="text-sm font-medium text-muted-foreground">Inspector</span>
-        </div>
-      </ResizablePanel>
+      <RightSidebar workflowId={workflowId} />
     </ResizablePanelGroup>
   )
 }
