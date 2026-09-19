@@ -14,6 +14,7 @@ import {
   type Connection,
   type Edge,
   type Node,
+  type NodeTypes,
   BackgroundVariant,
   type ColorMode,
   type DefaultEdgeOptions,
@@ -21,7 +22,13 @@ import {
 } from "@xyflow/react"
 import { useTheme } from "next-themes"
 
+import { StepNode } from "@/features/workflows/components/step-nodes"
+import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 import { cn } from "@/lib/utils"
+
+const nodeTypes: NodeTypes = {
+  step: StepNode,
+}
 
 export type WorkflowEdge = Edge & {
   pathOptions?: SmoothStepPathOptions
@@ -38,36 +45,21 @@ const defaultEdgeOptions: DefaultEdgeOptions & {
   },
 }
 
-const initialNodes: Node[] = [
+const initialNodes: StepNodeType[] = [
   {
-    id: "1",
-    data: { label: "Node 1" },
+    id: "start",
+    type: "step",
     position: { x: 150, y: 80 },
-    sourcePosition: Position.Bottom,
-    targetPosition: Position.Top,
-  },
-  {
-    id: "2",
-    data: { label: "Node 2" },
-    position: { x: 480, y: 280 },
-    sourcePosition: Position.Bottom,
-    targetPosition: Position.Top,
-  },
-]
-
-const initialEdges: WorkflowEdge[] = [
-  {
-    id: "e1-2",
-    source: "1",
-    target: "2",
-    type: "smoothstep",
-    style: { stroke: "var(--border)" },
-    pathOptions: {
-      borderRadius: 16,
-      offset: 20,
+    data: {
+      type: "start",
+      kind: "trigger",
+      title: "Start",
+      values: {},
     },
   },
 ]
+
+const initialEdges: WorkflowEdge[] = []
 
 export interface WorkflowCanvasProps
   extends React.HTMLAttributes<HTMLDivElement> {
@@ -91,7 +83,8 @@ export function WorkflowCanvas({
     ? ((resolvedTheme as ColorMode) ?? "light")
     : "light"
 
-  const [nodes, _setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [nodes, _setNodes, onNodesChange] =
+    useNodesState<StepNodeType>(initialNodes)
   const [edges, setEdges, onEdgesChange] =
     useEdgesState<WorkflowEdge>(initialEdges)
 
@@ -121,6 +114,7 @@ export function WorkflowCanvas({
       {...props}
     >
       <ReactFlow
+        nodeTypes={nodeTypes}
         nodes={nodes}
         edges={edges}
         onNodesChange={onNodesChange}
