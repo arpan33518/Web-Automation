@@ -1,7 +1,7 @@
 import { Room } from "@/features/workflows/components/room"
 import { WorkflowShell } from "@/features/workflows/components/workflow-shell"
 import { getWorkflow } from "@/features/workflows/data"
-import { liveblocks } from "@/lib/liveblocks"
+import { ensureWorkflowRoom } from "@/lib/liveblocks"
 import { auth } from "@clerk/nextjs/server"
 
 interface PageProps {
@@ -20,12 +20,7 @@ export default async function WorkflowPage({ params }: PageProps) {
     return <div>Workflow not found</div>
   }
 
-  await liveblocks.getOrCreateRoom(id, {
-    defaultAccesses: [],
-    groupsAccesses: {
-      [orgId]: ["room:write"],
-    },
-  })
+  await ensureWorkflowRoom(id, orgId)
 
   return (
     <Room roomId={id}>

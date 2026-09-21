@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server"
 
 import { liveblocks } from "@/lib/liveblocks"
+import { getUserColor } from "@/lib/colors"
 
 export async function POST(request: Request) {
   const { userId, orgId } = await auth()
@@ -21,11 +22,13 @@ export async function POST(request: Request) {
     {
       userId,
       groupIds: orgId ? [orgId] : [],
+      organizationId: orgId,
     },
     {
       userInfo: {
         name,
         avatar: user?.imageUrl,
+        color: getUserColor(userId),
       },
     }
   )

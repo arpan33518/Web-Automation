@@ -7,6 +7,7 @@ import { runs, tasks } from "@trigger.dev/sdk"
 
 import { createWorkflow } from "@/features/workflows/data"
 import { generateSlug } from "@/features/workflows/lib/generate-slug"
+import { liveblocks, markRoomEnsured } from "@/lib/liveblocks"
 import type { exampleTask } from "@/trigger/example"
 
 export async function createWorkflowAction(name?: string) {
@@ -20,6 +21,19 @@ export async function createWorkflowAction(name?: string) {
     orgId,
     name: name || generateSlug(),
   })
+
+  try {
+    await liveblocks.createRoom(workflow.id, {
+      organizationId: orgId,
+      defaultAccesses: [],
+      groupsAccesses: {
+        [orgId]: ["room:write"],
+      },
+    })
+    markRoomEnsured(workflow.id)
+  } catch (error) {
+    console.error(`Failed to pre-create Liveblocks room for ${workflow.id}:`, error)
+  }
 
   revalidatePath("/", "layout")
   redirect(`/workflows/${workflow.id}`)
