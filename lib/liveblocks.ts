@@ -10,6 +10,10 @@ export function markRoomEnsured(roomId: string) {
   ensuredRooms.add(roomId)
 }
 
+export function unmarkRoomEnsured(roomId: string) {
+  ensuredRooms.delete(roomId)
+}
+
 export async function ensureWorkflowRoom(roomId: string, orgId: string) {
   if (ensuredRooms.has(roomId)) {
     return

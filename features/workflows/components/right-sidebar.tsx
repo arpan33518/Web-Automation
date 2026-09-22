@@ -1,330 +1,676 @@
 "use client"
 
-import * as React from "react"
-import { Loader2, Play, Sparkles } from "lucide-react"
+import { useCallback, useState, useTransition } from "react"
+import { useParams, useRouter } from "next/navigation"
+import {
+  useNodes,
+  useOnSelectionChange,
+  useReactFlow,
+  useStoreApi,
+} from "@xyflow/react"
+import { useMutation } from "@liveblocks/react"
+import { LiveObject } from "@liveblocks/client"
+import { Loader2, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
-import { ResizablePanel } from "@/components/ui/resizable"
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { ResizablePanel } from "@/components/ui/resizable"
+import { Textarea } from "@/components/ui/textarea"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { cn } from "@/lib/utils"
+
+import {
+  nodeRegistry,
+  type NodeDefinition,
+  type NodeField,
+  type NodeType,
+  type StepNodeKind,
+  type StepNodeType,
+} from "@/features/workflows/nodes/node-registry"
+import {
+  deleteWorkflowAction,
   getWorkflowRunStatusAction,
   runWorkflowAction,
 } from "@/features/workflows/actions"
-import {
-  WorkflowRunState,
-  WorkflowRunStatus,
-} from "@/features/workflows/components/workflow-run-status"
+import { validateGraph } from "@/features/workflows/lib/validate-graph"
 
-interface RightSidebarProps extends React.ComponentProps<typeof ResizablePanel> {
-  workflowId?: string
-  runState?: WorkflowRunState | null
-  onRunStateChange?: (state: WorkflowRunState | null) => void
+// This file builds up to the RightSidebar component exported at the bottom: a
+// header with workflow actions (delete, run), then two tabs — a Toolbar for
+// adding nodes and an Editor for tweaking the selected node. Each helper below is
+// defined just above the block that uses it.
+
+// ---------------------------------------------------------------------------
+// Shared pieces — used by both the Toolbar and the Editor.
+// ---------------------------------------------------------------------------
+
+// The accent-colored icon chip, mirroring the node on the canvas.
+function NodeIcon({ type, className }: { type: NodeType; className?: string }) {
+  const def = nodeRegistry[type]
+  const Icon = def.icon
+  return (
+    <span
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-md",
+        def.accent,
+        className
+      )}
+    >
+      <Icon className="size-3.5" />
+    </span>
+  )
 }
 
-export function RightSidebar({
-  workflowId,
-  defaultSize = "18rem",
-  minSize = "16rem",
-  maxSize = "36rem",
-  runState: controlledRunState,
-  onRunStateChange,
-  ...props
-}: RightSidebarProps) {
-  const [internalRunState, setInternalRunState] =
-    React.useState<WorkflowRunState | null>(null)
-  const [isPending, startTransition] = React.useTransition()
-  const pollingRef = React.useRef<NodeJS.Timeout | null>(null)
-  const simulationTimerRef = React.useRef<NodeJS.Timeout[]>([])
-
-  const currentRunState = controlledRunState ?? internalRunState
-
-  const updateRunState = React.useCallback(
-    (nextState: WorkflowRunState | null) => {
-      if (onRunStateChange) {
-        onRunStateChange(nextState)
-      } else {
-        setInternalRunState(nextState)
-      }
-    },
-    [onRunStateChange]
+// A titled, scrollable panel. Each tab renders its content inside one.
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  icon?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 border-y border-border bg-card px-3 py-1.5 text-sm font-semibold">
+        {icon}
+        {title}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+    </div>
   )
+}
 
-  // Clear timers on unmount
-  React.useEffect(() => {
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current)
-      simulationTimerRef.current.forEach(clearTimeout)
-    }
-  }, [])
+// ---------------------------------------------------------------------------
+// Editor tab — edits the fields of the selected node.
+// ---------------------------------------------------------------------------
 
-  // Start polling Trigger.dev for status updates
-  const startPolling = React.useCallback(
-    (runId: string) => {
-      if (pollingRef.current) clearInterval(pollingRef.current)
+// A single editor field for a node property.
+function Field({
+  field,
+  value,
+  onChange,
+}: {
+  field: NodeField
+  value: string
+  onChange: (value: string) => void
+}) {
+  if (field.multiline) {
+    return (
+      <Textarea
+        id={field.key}
+        value={value}
+        placeholder={field.placeholder}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    )
+  }
 
-      pollingRef.current = setInterval(async () => {
-        try {
-          const result = await getWorkflowRunStatusAction(runId)
-          updateRunState({
-            runId: result.id,
-            status: result.status,
-            isCompleted: result.isCompleted,
-            isExecuting: result.isExecuting,
-            isQueued: result.isQueued,
-            createdAt: result.createdAt,
-            startedAt: result.startedAt,
-            finishedAt: result.finishedAt,
-            durationMs: result.durationMs,
-            error: result.error,
-            output: result.output,
-            isSimulated: false,
-          })
+  return (
+    <Input
+      id={field.key}
+      value={value}
+      placeholder={field.placeholder}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  )
+}
 
-          if (result.isCompleted) {
-            if (pollingRef.current) clearInterval(pollingRef.current)
-            if (result.status === "COMPLETED") {
-              toast.success("Workflow completed successfully!")
+// The Editor tab: one input per field on the selected node, or an empty state.
+function Inspector({ node }: { node: StepNodeType | undefined }) {
+  const { setNodes } = useReactFlow<StepNodeType>()
+
+  const updateNodeInLiveblocks = useMutation(
+    ({ storage }, nodeId: string, key: string, value: string) => {
+      const flow = (storage as any).get("flow")
+      if (flow) {
+        const nodesMap = flow.get("nodes")
+        const liveNode = nodesMap?.get(nodeId)
+        if (liveNode) {
+          const data = liveNode.get("data")
+          if (data) {
+            const values = data.get("values")
+            if (values && typeof values.set === "function") {
+              values.set(key, value)
+            } else if (values && typeof values === "object") {
+              data.set("values", new LiveObject({ ...values, [key]: value }))
             } else {
-              toast.error(`Workflow ended with status: ${result.status}`)
+              data.set("values", new LiveObject({ [key]: value }))
             }
           }
-        } catch (error) {
-          console.error("Polling error:", error)
         }
-      }, 700)
+      }
     },
-    [updateRunState]
+    []
   )
 
-  const handleRun = () => {
-    // Clear any previous running simulation
-    simulationTimerRef.current.forEach(clearTimeout)
-    simulationTimerRef.current = []
+  if (!node) {
+    return (
+      <Section title="Editor">
+        <p className="p-3 text-sm text-muted-foreground">No node selected</p>
+      </Section>
+    )
+  }
+
+  const { type, title, values } = node.data
+  const def: NodeDefinition = nodeRegistry[type]
+
+  const updateField = (key: string, value: string) => {
+    setNodes((nodes) =>
+      nodes.map((n) => {
+        if (n.id === node.id) {
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              values: {
+                ...(n.data?.values ?? {}),
+                [key]: value,
+              },
+            },
+          }
+        }
+        return n
+      })
+    )
+
+    try {
+      updateNodeInLiveblocks(node.id, key, value)
+    } catch {
+      // Ignore if not yet connected to Liveblocks storage
+    }
+  }
+
+  return (
+    <Section title={title} icon={<NodeIcon type={type} />}>
+      <div className="flex flex-col gap-3 p-3">
+        {def.fields.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No properties</p>
+        ) : (
+          def.fields.map((field) => (
+            <div key={field.key} className="flex flex-col gap-1.5">
+              <Label htmlFor={field.key} className="text-xs">
+                {field.label}
+              </Label>
+              <Field
+                field={field}
+                value={values?.[field.key] ?? ""}
+                onChange={(value) => updateField(field.key, value)}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </Section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Toolbar tab — adds nodes to the canvas, grouped by kind.
+// ---------------------------------------------------------------------------
+
+// The Toolbar's groups, one accordion section per node kind.
+const sections: { kind: StepNodeKind; label: string }[] = [
+  { kind: "trigger", label: "Triggers" },
+  { kind: "action", label: "Actions" },
+]
+
+// Every node type from the registry, filtered into the groups below.
+const definitions = Object.values(nodeRegistry)
+
+// The Toolbar tab: a button per node type that adds it to the canvas.
+function Palette() {
+  const store = useStoreApi()
+  const { screenToFlowPosition, getNodes, setNodes } = useReactFlow<StepNodeType>()
+
+  const addNodeToLiveblocks = useMutation(
+    ({ storage }, newNode: StepNodeType) => {
+      const flow = (storage as any).get("flow")
+      if (flow) {
+        const nodesMap = flow.get("nodes")
+        if (nodesMap) {
+          nodesMap.set(newNode.id, LiveObject.from(newNode))
+        }
+      }
+    },
+    []
+  )
+
+  const add = (type: NodeType) => {
+    const def = nodeRegistry[type]
+    const existingNodes = getNodes()
+
+    if (def.kind === "trigger") {
+      const hasTrigger = existingNodes.some((node) => node.data?.kind === "trigger")
+      if (hasTrigger) {
+        toast.error("Only a single trigger node is allowed")
+        return
+      }
+    }
+
+    const sameTypeNodes = existingNodes.filter((node) => node.data?.type === type)
+    const regex = new RegExp(`^${def.label}\\s+(\\d+)$`)
+    let maxNum = 0
+    for (const n of sameTypeNodes) {
+      const match = n.data?.title?.match(regex)
+      if (match) {
+        const num = parseInt(match[1], 10)
+        if (num > maxNum) maxNum = num
+      }
+    }
+    const count = Math.max(sameTypeNodes.length + 1, maxNum + 1)
+    const title = def.kind === "trigger" ? def.label : `${def.label} ${count}`
+
+    const domNode = store.getState().domNode ?? document.querySelector<HTMLElement>(".react-flow")
+    const rect = domNode?.getBoundingClientRect()
+    const centerScreen = rect
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    const flowPosition = screenToFlowPosition(centerScreen)
+
+    const newNode: StepNodeType = {
+      id: crypto.randomUUID(),
+      type: "step",
+      position: {
+        x: flowPosition.x - 100,
+        y: flowPosition.y - 25,
+      },
+      data: {
+        type,
+        kind: def.kind,
+        title,
+        values: {},
+      },
+    }
+
+    setNodes((nodes) => [...nodes, newNode])
+
+    try {
+      addNodeToLiveblocks(newNode)
+    } catch {
+      // fallback if liveblocks storage not ready yet
+    }
+  }
+
+  return (
+    <Section title="Toolbar">
+      <Accordion
+        type="multiple"
+        defaultValue={sections.map((s) => s.kind)}
+        className="px-3 py-2"
+      >
+        {sections.map((section) => (
+          <AccordionItem
+            key={section.kind}
+            value={section.kind}
+            className="not-last:border-b-0"
+          >
+            <AccordionTrigger className="py-2 text-xs font-medium text-muted-foreground hover:no-underline">
+              {section.label}
+            </AccordionTrigger>
+            <AccordionContent className="flex flex-col gap-0.5">
+              {definitions
+                .filter((def) => def.kind === section.kind)
+                .map((def) => (
+                  <Button
+                    key={def.type}
+                    variant="ghost"
+                    onClick={() => add(def.type as NodeType)}
+                    className="justify-start gap-2.5 px-1.5 text-xs"
+                  >
+                    <NodeIcon type={def.type as NodeType} />
+                    {def.label}
+                  </Button>
+                ))}
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+    </Section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Header — workflow-level actions shown above the tabs.
+// ---------------------------------------------------------------------------
+
+// The "..." menu for workflow-level actions.
+function ActionsMenu({ workflowId }: { workflowId?: string }) {
+  const params = useParams()
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+
+  const id = workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
+
+  const handleDelete = () => {
+    if (!id || isPending) return
 
     startTransition(async () => {
       try {
-        const initialTimestamp = new Date().toISOString()
-        updateRunState({
-          runId: null,
-          status: "QUEUED",
-          isCompleted: false,
-          isExecuting: false,
-          isQueued: true,
-          createdAt: initialTimestamp,
-          startedAt: initialTimestamp,
-          finishedAt: null,
-          durationMs: null,
-          error: null,
-          output: null,
-          isSimulated: false,
-        })
-
-        const handle = await runWorkflowAction(
-          workflowId ? { message: `Workflow ${workflowId} run` } : undefined
-        )
-
-        updateRunState({
-          runId: handle.id,
-          status: "QUEUED",
-          isCompleted: false,
-          isExecuting: false,
-          isQueued: true,
-          createdAt: initialTimestamp,
-          startedAt: initialTimestamp,
-          finishedAt: null,
-          durationMs: null,
-          error: null,
-          output: null,
-          isSimulated: false,
-        })
-
-        toast.success(`Workflow triggered (Run ID: ${handle.id})`)
-        startPolling(handle.id)
+        await deleteWorkflowAction(id)
+        router.push("/")
       } catch (error) {
-        console.error("Failed to run workflow:", error)
-        toast.error("Failed to run workflow")
-        updateRunState({
+        if (
+          error &&
+          typeof error === "object" &&
+          "digest" in error &&
+          typeof error.digest === "string" &&
+          error.digest.startsWith("NEXT_REDIRECT")
+        ) {
+          return
+        }
+        console.error("Failed to delete workflow:", error)
+        toast.error("Failed to delete workflow")
+      }
+    })
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon" variant="ghost" disabled={isPending}>
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-48">
+        <DropdownMenuItem
+          variant="destructive"
+          disabled={isPending || !id}
+          className="text-xs [&_svg:not([class*='size-'])]:size-3.5"
+          onSelect={(e) => {
+            e.preventDefault()
+            handleDelete()
+          }}
+        >
+          <Trash2 />
+          {isPending ? "Deleting workflow..." : "Delete workflow"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+// Kicks off a run of the current workflow and populates results in Liveblocks.
+function RunButton({ workflowId }: { workflowId?: string }) {
+  const params = useParams()
+  const [isRunning, setIsRunning] = useState(false)
+  const { getNodes, getEdges } = useReactFlow<StepNodeType>()
+
+  const id = workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
+
+  const populateRunInLiveblocks = useMutation(
+    ({ storage }, runData: any) => {
+      ;(storage as any).set("lastRun", new LiveObject(runData))
+    },
+    []
+  )
+
+  const syncGraphToLiveblocks = useMutation(
+    ({ storage }, currentNodes: StepNodeType[], currentEdges: any[]) => {
+      const flow = (storage as any).get("flow")
+      if (flow) {
+        const nodesMap = flow.get("nodes")
+        const edgesMap = flow.get("edges")
+        if (nodesMap && edgesMap) {
+          for (const n of currentNodes) {
+            if (!nodesMap.has(n.id)) {
+              nodesMap.set(n.id, LiveObject.from(n))
+            }
+          }
+          for (const e of currentEdges) {
+            if (!edgesMap.has(e.id)) {
+              edgesMap.set(e.id, LiveObject.from(e))
+            }
+          }
+        }
+      }
+    },
+    []
+  )
+
+  const handleRun = async () => {
+    if (isRunning) return
+
+    const nodes = getNodes()
+    const edges = getEdges()
+
+    // 1. Validate the graph with topological sort
+    const problems = validateGraph({ nodes, edges })
+    if (problems.length > 0) {
+      toast.error(problems[0])
+      return
+    }
+
+    setIsRunning(true)
+    const startedAt = new Date().toISOString()
+    const startMs = Date.now()
+
+    // 2. Sync nodes & edges into Liveblocks
+    try {
+      syncGraphToLiveblocks(nodes, edges)
+    } catch (syncErr) {
+      console.warn("Could not sync nodes directly to Liveblocks:", syncErr)
+    }
+
+    // 3. Populate QUEUED run state in Liveblocks
+    try {
+      populateRunInLiveblocks({
+        runId: null,
+        status: "QUEUED",
+        isCompleted: false,
+        isExecuting: false,
+        isQueued: true,
+        createdAt: startedAt,
+        startedAt,
+        finishedAt: null,
+        durationMs: null,
+        error: null,
+        output: null,
+        nodesCount: nodes.length,
+        edgesCount: edges.length,
+      })
+    } catch (lbErr) {
+      console.warn("Failed to set initial run in Liveblocks:", lbErr)
+    }
+
+    try {
+      toast.info("Running workflow...")
+
+      // 4. Trigger workflow run action (logs to terminal and triggers Trigger.dev task)
+      const result = await runWorkflowAction({
+        workflowId: id,
+        graph: { nodes, edges },
+        message: `Workflow run triggered from right sidebar at ${new Date().toLocaleTimeString()}`,
+      })
+
+      // 5. Update Liveblocks with runId and begin polling Trigger.dev worker status
+      if (result.id) {
+        populateRunInLiveblocks({
+          runId: result.id,
+          status: "QUEUED",
+          isCompleted: false,
+          isExecuting: false,
+          isQueued: true,
+          createdAt: startedAt,
+          startedAt,
+          finishedAt: null,
+          durationMs: null,
+          error: null,
+          output: result.output,
+          nodesCount: nodes.length,
+          edgesCount: edges.length,
+        })
+
+        let pollCount = 0
+        const pollInterval = setInterval(async () => {
+          pollCount++
+          try {
+            const runInfo = await getWorkflowRunStatusAction(result.id)
+            populateRunInLiveblocks({
+              runId: runInfo.id,
+              status: runInfo.status,
+              isCompleted: runInfo.isCompleted,
+              isExecuting: runInfo.isExecuting,
+              isQueued: runInfo.isQueued,
+              createdAt: runInfo.createdAt ?? startedAt,
+              startedAt: runInfo.startedAt ?? startedAt,
+              finishedAt: runInfo.finishedAt,
+              durationMs: runInfo.durationMs ?? (Date.now() - startMs),
+              error: runInfo.error,
+              output: runInfo.output ?? result.output,
+              nodesCount: nodes.length,
+              edgesCount: edges.length,
+            })
+
+            if (runInfo.isCompleted || pollCount >= 30) {
+              clearInterval(pollInterval)
+            }
+          } catch {
+            if (pollCount >= 30) {
+              clearInterval(pollInterval)
+            }
+          }
+        }, 1500)
+      } else {
+        const finishedAt = new Date().toISOString()
+        const durationMs = Date.now() - startMs
+
+        populateRunInLiveblocks({
+          runId: null,
+          status: "COMPLETED",
+          isCompleted: true,
+          isExecuting: false,
+          isQueued: false,
+          createdAt: startedAt,
+          startedAt,
+          finishedAt,
+          durationMs,
+          error: null,
+          output: result.output,
+          nodesCount: nodes.length,
+          edgesCount: edges.length,
+        })
+      }
+
+      toast.success("Workflow triggered! Watching execution progress...")
+    } catch (error: any) {
+      console.error("Workflow execution error:", error)
+      const errorMsg = error?.message || "Failed to execute workflow"
+      toast.error(errorMsg)
+
+      try {
+        populateRunInLiveblocks({
           runId: null,
           status: "FAILED",
           isCompleted: true,
           isExecuting: false,
           isQueued: false,
-          createdAt: null,
-          startedAt: null,
-          finishedAt: null,
-          durationMs: null,
-          error: error instanceof Error ? error.message : "Failed to run workflow",
+          createdAt: startedAt,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - startMs,
+          error: errorMsg,
           output: null,
-          isSimulated: false,
+          nodesCount: nodes.length,
+          edgesCount: edges.length,
         })
+      } catch {
+        // ignore
       }
-    })
+    } finally {
+      setIsRunning(false)
+    }
   }
 
-  // Interactive flow preview / simulation (Queued -> Dequeued -> Executing -> Completed)
-  const handleSimulate = () => {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    simulationTimerRef.current.forEach(clearTimeout)
-    simulationTimerRef.current = []
+  return (
+    <Button
+      size="sm"
+      variant={isRunning ? "outline" : "secondary"}
+      disabled={isRunning}
+      onClick={handleRun}
+      className="gap-1.5"
+    >
+      {isRunning ? (
+        <>
+          <Loader2 className="size-3.5 animate-spin text-primary" />
+          <span>Running...</span>
+        </>
+      ) : (
+        <>
+          <Play className="size-3.5 fill-primary" />
+          <span>Run</span>
+        </>
+      )}
+    </Button>
+  )
+}
 
-    const mockRunId = `run_sim_${Math.random().toString(36).substring(2, 9)}`
-    const startTime = new Date().toISOString()
+// ---------------------------------------------------------------------------
+// The sidebar itself — header on top, then the Toolbar / Editor tabs.
+// ---------------------------------------------------------------------------
 
-    // 1. Queued
-    updateRunState({
-      runId: mockRunId,
-      status: "QUEUED",
-      isCompleted: false,
-      isExecuting: false,
-      isQueued: true,
-      createdAt: startTime,
-      startedAt: startTime,
-      finishedAt: null,
-      durationMs: null,
-      error: null,
-      output: null,
-      isSimulated: true,
-    })
+export function RightSidebar({ workflowId }: { workflowId?: string } = {}) {
+  const [tab, setTab] = useState("toolbar")
 
-    // 2. Dequeued after 1.2s
-    const t1 = setTimeout(() => {
-      updateRunState({
-        runId: mockRunId,
-        status: "DEQUEUED",
-        isCompleted: false,
-        isExecuting: false,
-        isQueued: false,
-        createdAt: startTime,
-        startedAt: startTime,
-        finishedAt: null,
-        durationMs: null,
-        error: null,
-        output: null,
-        isSimulated: true,
-      })
-    }, 1200)
+  const nodes = useNodes<StepNodeType>()
+  const selected = nodes.find((node) => node.selected)
 
-    // 3. Executing after 2.4s
-    const t2 = setTimeout(() => {
-      updateRunState({
-        runId: mockRunId,
-        status: "EXECUTING",
-        isCompleted: false,
-        isExecuting: true,
-        isQueued: false,
-        createdAt: startTime,
-        startedAt: startTime,
-        finishedAt: null,
-        durationMs: null,
-        error: null,
-        output: null,
-        isSimulated: true,
-      })
-    }, 2400)
-
-    // 4. Completed after 4.2s
-    const t3 = setTimeout(() => {
-      const endTime = new Date().toISOString()
-      updateRunState({
-        runId: mockRunId,
-        status: "COMPLETED",
-        isCompleted: true,
-        isExecuting: false,
-        isQueued: false,
-        createdAt: startTime,
-        startedAt: startTime,
-        finishedAt: endTime,
-        durationMs: 1800,
-        error: null,
-        output: {
-          message: "Workflow executed successfully!",
-          stepsCompleted: 3,
-          duration: "1.8s",
-        },
-        isSimulated: true,
-      })
-      toast.success("Simulation finished successfully!")
-    }, 4200)
-
-    simulationTimerRef.current = [t1, t2, t3]
-  }
-
-  const handleReset = () => {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    simulationTimerRef.current.forEach(clearTimeout)
-    simulationTimerRef.current = []
-    updateRunState(null)
-  }
-
-  const isRunning =
-    isPending ||
-    (currentRunState !== null &&
-      !currentRunState.isCompleted &&
-      currentRunState.status !== "IDLE")
+  useOnSelectionChange({
+    onChange: useCallback(({ nodes }) => {
+      if (nodes.length > 0) {
+        setTab("editor")
+      }
+    }, []),
+  })
 
   return (
     <ResizablePanel
-      defaultSize={defaultSize}
-      minSize={minSize}
-      maxSize={maxSize}
-      className="flex flex-col bg-background/50 backdrop-blur-sm"
-      {...props}
+      className="bg-background"
+      defaultSize="16rem"
+      minSize="14rem"
+      maxSize="36rem"
+      groupResizeBehavior="preserve-pixel-size"
     >
-      <div className="flex h-full flex-col overflow-y-auto p-4 gap-4 no-scrollbar">
-        {/* Panel Header */}
-        <div className="flex items-center justify-between border-b border-border/50 pb-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Inspector</h3>
-            <p className="text-[11px] text-muted-foreground">Workflow controls & run monitor</p>
-          </div>
-          {workflowId && (
-            <span className="font-mono text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-              {workflowId.slice(0, 8)}
-            </span>
-          )}
+      <Tabs value={tab} onValueChange={setTab} className="size-full gap-0">
+        <div className="flex items-center justify-between border-b border-border p-2">
+          <ActionsMenu workflowId={workflowId} />
+          <RunButton workflowId={workflowId} />
         </div>
-
-        {/* Run Controls Area */}
-        <div className="flex flex-col items-center gap-2 pt-1">
-          <Button
-            onClick={handleRun}
-            disabled={isRunning}
-            size="lg"
-            className="w-full flex items-center justify-center gap-2 font-semibold shadow-md transition-all active:scale-[0.98]"
+        <TabsList className="m-2 w-fit bg-background">
+          <TabsTrigger
+            value="toolbar"
+            className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
           >
-            {isRunning ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Play className="size-4 fill-current" />
-            )}
-            {isRunning ? "EXECUTING WORKFLOW..." : "RUN WORKFLOW"}
-          </Button>
-
-          {/* Quick Simulation trigger */}
-          {!isRunning && (!currentRunState || currentRunState.isCompleted) && (
-            <button
-              type="button"
-              onClick={handleSimulate}
-              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-primary transition-colors py-0.5"
-            >
-              <Sparkles className="size-3" />
-              Simulate run pipeline
-            </button>
-          )}
-        </div>
-
-        {/* Status Feature below the Run button */}
-        <div className="flex flex-col gap-1.5">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground px-0.5">
-            Run Status
-          </div>
-          <WorkflowRunStatus
-            runState={currentRunState}
-            onSimulate={handleSimulate}
-            onReset={handleReset}
-          />
-        </div>
-      </div>
+            Toolbar
+          </TabsTrigger>
+          <TabsTrigger
+            value="editor"
+            className="flex-none rounded-sm data-active:bg-accent! data-active:text-accent-foreground! data-active:shadow-none! dark:data-active:border-transparent!"
+          >
+            Editor
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="toolbar" className="flex min-h-0 flex-col">
+          <Palette />
+        </TabsContent>
+        <TabsContent value="editor" className="flex min-h-0 flex-col">
+          <Inspector node={selected} />
+        </TabsContent>
+      </Tabs>
     </ResizablePanel>
   )
 }

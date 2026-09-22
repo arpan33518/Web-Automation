@@ -2,6 +2,6 @@ import { defineConfig } from "@trigger.dev/sdk"
 
 export default defineConfig({
   project: "proj_nahuheiccuzkqjoxvbbu",
-  dirs: ["./src/trigger"],
+  dirs: ["./features/workflows/tasks"],
   maxDuration: 300,
 })

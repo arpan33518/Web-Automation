@@ -30,7 +30,10 @@ export default function RootLayout({
         geist.variable
       )}
     >
-      <body>
+      <head>
+        <meta name="darkreader-lock" />
+      </head>
+      <body suppressHydrationWarning>
         <ClerkProvider
           appearance={{ theme: shadcn }}
           taskUrls={{ "choose-organization": "/choose-organization" }}

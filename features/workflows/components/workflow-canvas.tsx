@@ -48,39 +48,45 @@ const defaultEdgeOptions: DefaultEdgeOptions & {
   },
 }
 
-const initialNodes: StepNodeType[] = [
+import type { WorkflowGraph } from "@/lib/db/schema"
+
+const defaultInitialNodes: StepNodeType[] = [
   {
     id: "start",
     type: "step",
     position: { x: 150, y: 80 },
     data: { type: "start", kind: "trigger", title: "start", values: {} }
   },
-
 ]
 
-const initialEdges: WorkflowEdge[] = []
+const defaultInitialEdges: WorkflowEdge[] = []
 
 export interface WorkflowCanvasProps
   extends React.HTMLAttributes<HTMLDivElement> {
   workflowId?: string
+  initialGraph?: WorkflowGraph
 }
-
-const emptySubscribe = () => () => { }
 
 export function WorkflowCanvas({
   workflowId,
+  initialGraph,
   className,
   ...props
 }: WorkflowCanvasProps) {
   const { resolvedTheme } = useTheme()
-  const mounted = React.useSyncExternalStore(
-    emptySubscribe,
-    () => true,
-    () => false
-  )
-  const colorMode: ColorMode = mounted
-    ? ((resolvedTheme as ColorMode) ?? "light")
-    : "light"
+  const colorMode: ColorMode = (resolvedTheme as ColorMode) ?? "system"
+
+  const effectiveInitialNodes = React.useMemo(() => {
+    return (initialGraph?.nodes && initialGraph.nodes.length > 0)
+      ? (initialGraph.nodes as StepNodeType[])
+      : defaultInitialNodes
+  }, [initialGraph])
+
+  const effectiveInitialEdges = React.useMemo(() => {
+    return (initialGraph?.edges && initialGraph.edges.length > 0)
+      ? (initialGraph.edges as WorkflowEdge[])
+      : defaultInitialEdges
+  }, [initialGraph])
 
   const {
     nodes,
@@ -92,16 +98,16 @@ export function WorkflowCanvas({
     isLoading,
   } = useLiveblocksFlow({
     nodes: {
-      initial: initialNodes,
+      initial: effectiveInitialNodes,
     },
     edges: {
-      initial: initialEdges,
+      initial: effectiveInitialEdges,
     },
   })
 
   // Provide initial nodes immediately so the canvas renders instantly with zero delay
-  const displayNodes = nodes ?? initialNodes
-  const displayEdges = edges ?? initialEdges
+  const displayNodes = nodes ?? effectiveInitialNodes
+  const displayEdges = edges ?? effectiveInitialEdges
 
   const others = useOthers()
   const self = useSelf()

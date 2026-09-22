@@ -1,18 +1,48 @@
 "use client"
 
+import dynamic from "next/dynamic"
+
+import { useMutation, useStorage } from "@liveblocks/react"
+
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { RightSidebar } from "@/features/workflows/components/right-sidebar"
-import { WorkflowCanvas } from "@/features/workflows/components/workflow-canvas"
+import { WorkflowRunStatus } from "@/features/workflows/components/workflow-run-status"
+import type { WorkflowGraph } from "@/lib/db/schema"
+
+const WorkflowCanvas = dynamic(
+  () =>
+    import("@/features/workflows/components/workflow-canvas").then(
+      (mod) => mod.WorkflowCanvas
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex size-full items-center justify-center bg-background text-xs text-muted-foreground">
+        Loading canvas...
+      </div>
+    ),
+  }
+)
 
 interface WorkflowShellProps {
   workflowId: string
+  initialGraph?: WorkflowGraph
 }
 
-export function WorkflowShell({ workflowId }: WorkflowShellProps) {
+export function WorkflowShell({ workflowId, initialGraph }: WorkflowShellProps) {
+  const liveRunState = useStorage((storage) => (storage as any)?.lastRun)
+  const resetRunState = useMutation(({ storage }) => {
+    try {
+      ;(storage as any).delete("lastRun")
+    } catch {
+      // ignore
+    }
+  }, [])
+
   return (
     <ResizablePanelGroup
       orientation="horizontal"
@@ -24,15 +54,18 @@ export function WorkflowShell({ workflowId }: WorkflowShellProps) {
         <ResizablePanelGroup orientation="vertical" className="size-full">
           {/* Top panel: canvas */}
           <ResizablePanel minSize="18rem">
-            <WorkflowCanvas workflowId={workflowId} />
+            <WorkflowCanvas workflowId={workflowId} initialGraph={initialGraph} />
           </ResizablePanel>
 
           <ResizableHandle />
 
-          {/* Bottom panel: logs */}
-          <ResizablePanel defaultSize="8rem" minSize="6rem">
-            <div className="flex size-full items-center justify-center p-4">
-              <span className="text-sm font-medium text-muted-foreground">Logs</span>
+          {/* Bottom panel: logs / run execution */}
+          <ResizablePanel defaultSize="10rem" minSize="6rem" className="bg-background">
+            <div className="size-full overflow-y-auto p-3">
+              <WorkflowRunStatus
+                runState={liveRunState ?? null}
+                onReset={resetRunState}
+              />
             </div>
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -45,3 +78,4 @@ export function WorkflowShell({ workflowId }: WorkflowShellProps) {
     </ResizablePanelGroup>
   )
 }
+
