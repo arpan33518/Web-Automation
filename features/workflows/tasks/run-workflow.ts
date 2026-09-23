@@ -1,5 +1,10 @@
+import { config } from "dotenv"
 import type { Edge } from "@xyflow/react"
 import { logger, metadata, tags, task } from "@trigger.dev/sdk"
+import { browserbase, localBrowser, Stagehand } from "@browserbasehq/stagehand"
+
+// Ensure .env.local is loaded even if Trigger.dev dev process was started prior to editing env
+config({ path: ".env.local", override: true })
 
 import { getWorkflow } from "@/features/workflows/data"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
@@ -126,33 +131,114 @@ export const runWorkflowTask = task({
 
     logger.log(`Running workflow "${workflow.name}"`, { totalSteps: order.length })
 
-    const executedSteps: Array<{ id: string; title: string; type: string }> = []
-
-    for (const stepId of order) {
-      const node = nodeById.get(stepId)
-      if (node) {
-        const stepType = node.data?.type ?? node.type ?? "step"
-        const stepTitle = node.data?.title || stepType
-        const values = node.data?.values || {}
-
-        logger.log(`Running step: ${stepTitle} (${stepType})`, { stepId, values })
-
-        if (stepType === "open-url") {
-          const targetUrl = values.url || "https://example.com"
-          logger.log(`Action [open-url]: ${targetUrl}`)
-        }
-
-        executedSteps.push({
-          id: stepId,
-          title: stepTitle,
-          type: stepType,
-        })
-      }
+    let stagehand: Stagehand | null = null
+    const ctx: {
+      browser: { close?: () => Promise<void>; context?: any } | null
+    } = {
+      browser: null,
     }
 
-    logger.log(`Successfully completed workflow "${workflow.name}"`, {
-      executedCount: executedSteps.length,
-    })
+    const getStagehand = async () => {
+      if (stagehand) return stagehand
+
+      let browser
+      if (process.env.BROWSERBASE_API_KEY) {
+        logger.log("Connecting to Browserbase cloud browser...", {
+          projectId: process.env.BROWSERBASE_PROJECT_ID,
+        })
+        try {
+          browser = await browserbase.launch({
+            apiKey: process.env.BROWSERBASE_API_KEY,
+            projectId: process.env.BROWSERBASE_PROJECT_ID,
+          })
+          ctx.browser = browser
+
+          const sessionId = (browser as unknown as { sessionId?: string }).sessionId
+          if (sessionId) {
+            const sessionUrl = `https://browserbase.com/sessions/${sessionId}`
+            logger.log(`Browserbase Session Started: ${sessionId}`)
+            logger.log(`Session Dashboard & Video: ${sessionUrl}`)
+            metadata.set("browserbaseSessionId", sessionId)
+            metadata.set("browserbaseSessionUrl", sessionUrl)
+          }
+        } catch (bbError: any) {
+          const cause = bbError?.cause
+          logger.error("Browserbase cloud launch failed:", {
+            error: bbError?.message || String(bbError),
+            cause: cause?.message || String(cause),
+            status: cause?.status || cause?.statusCode,
+          })
+          logger.warn("Falling back to local Chrome browser...")
+          browser = await localBrowser.launch({ headless: true })
+          ctx.browser = browser
+        }
+      } else {
+        logger.warn(
+          "BROWSERBASE_API_KEY is not set — falling back to local Chrome browser. Cloud session video will NOT be available.",
+        )
+        browser = await localBrowser.launch({ headless: true })
+        ctx.browser = browser
+      }
+
+      stagehand = await Stagehand.create({
+        browser,
+        logging: { level: "info", format: "pretty" },
+      })
+
+      return stagehand
+    }
+
+    const executedSteps: Array<{ id: string; title: string; type: string }> = []
+
+    try {
+      for (const stepId of order) {
+        const node = nodeById.get(stepId)
+        if (node) {
+          const stepType = node.data?.type ?? node.type ?? "step"
+          const stepTitle = node.data?.title || stepType
+          const values = node.data?.values || {}
+
+          logger.log(`Running step: ${stepTitle} (${stepType})`, { stepId, values })
+
+          if (stepType === "open-url") {
+            const targetUrl = values.url || "https://example.com"
+            logger.log(`Action [open-url]: Navigating to ${targetUrl}`)
+
+            const sh = await getStagehand()
+            const [page] = await sh.browser.context.pages()
+            if (page) {
+              try {
+                await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60_000 })
+              } catch (navErr) {
+                logger.warn(`Navigation to ${targetUrl} completed with notice:`, { error: navErr })
+              }
+            }
+          }
+
+          executedSteps.push({
+            id: stepId,
+            title: stepTitle,
+            type: stepType,
+          })
+        }
+      }
+
+      logger.log(`Successfully completed workflow "${workflow.name}"`, {
+        executedCount: executedSteps.length,
+      })
+    } finally {
+      try {
+        await (stagehand as Stagehand | null)?.close()
+      } catch (err) {
+        logger.warn("Error closing Stagehand", { error: err })
+      }
+      try {
+        await ctx.browser?.close?.()
+      } catch (err) {
+        logger.warn("Error closing browser", { error: err })
+      }
+
+    }
 
     return {
       workflowId,

@@ -1,8 +1,9 @@
 "use client"
 
+import { useCallback } from "react"
 import dynamic from "next/dynamic"
 
-import { useMutation, useStorage } from "@liveblocks/react"
+import { useMutation, useStorage, useStorageRoot } from "@liveblocks/react"
 
 import {
   ResizableHandle,
@@ -34,6 +35,7 @@ interface WorkflowShellProps {
 }
 
 export function WorkflowShell({ workflowId, initialGraph }: WorkflowShellProps) {
+  const [storageRoot] = useStorageRoot()
   const liveRunState = useStorage((storage) => (storage as any)?.lastRun)
   const resetRunState = useMutation(({ storage }) => {
     try {
@@ -42,6 +44,15 @@ export function WorkflowShell({ workflowId, initialGraph }: WorkflowShellProps) 
       // ignore
     }
   }, [])
+
+  const handleReset = useCallback(() => {
+    if (!storageRoot) return
+    try {
+      resetRunState()
+    } catch {
+      // ignore
+    }
+  }, [storageRoot, resetRunState])
 
   return (
     <ResizablePanelGroup
@@ -64,7 +75,7 @@ export function WorkflowShell({ workflowId, initialGraph }: WorkflowShellProps) 
             <div className="size-full overflow-y-auto p-3">
               <WorkflowRunStatus
                 runState={liveRunState ?? null}
-                onReset={resetRunState}
+                onReset={handleReset}
               />
             </div>
           </ResizablePanel>

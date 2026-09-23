@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useState, useTransition } from "react"
+import { useCallback, useRef, useState, useTransition } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   useNodes,
@@ -8,7 +8,7 @@ import {
   useReactFlow,
   useStoreApi,
 } from "@xyflow/react"
-import { useMutation } from "@liveblocks/react"
+import { useMutation, useStorageRoot } from "@liveblocks/react"
 import { LiveObject } from "@liveblocks/client"
 import { Loader2, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -243,7 +243,7 @@ function Palette() {
       if (flow) {
         const nodesMap = flow.get("nodes")
         if (nodesMap) {
-          nodesMap.set(newNode.id, LiveObject.from(newNode))
+          nodesMap.set(newNode.id, LiveObject.from(newNode as any))
         }
       }
     },
@@ -411,6 +411,9 @@ function RunButton({ workflowId }: { workflowId?: string }) {
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
 
   const id = workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
+  const [storageRoot] = useStorageRoot()
+  const storageRootRef = useRef(storageRoot)
+  storageRootRef.current = storageRoot
 
   const populateRunInLiveblocks = useMutation(
     ({ storage }, runData: any) => {
@@ -428,18 +431,46 @@ function RunButton({ workflowId }: { workflowId?: string }) {
         if (nodesMap && edgesMap) {
           for (const n of currentNodes) {
             if (!nodesMap.has(n.id)) {
-              nodesMap.set(n.id, LiveObject.from(n))
+              nodesMap.set(n.id, LiveObject.from(n as any))
             }
           }
           for (const e of currentEdges) {
             if (!edgesMap.has(e.id)) {
-              edgesMap.set(e.id, LiveObject.from(e))
+              edgesMap.set(e.id, LiveObject.from(e as any))
             }
           }
         }
       }
     },
     []
+  )
+
+  const safePopulateRun = useCallback(
+    (runData: any) => {
+      if (!storageRootRef.current) {
+        return
+      }
+      try {
+        populateRunInLiveblocks(runData)
+      } catch (err) {
+        console.warn("Failed to set run state in Liveblocks:", err)
+      }
+    },
+    [populateRunInLiveblocks]
+  )
+
+  const safeSyncGraph = useCallback(
+    (currentNodes: StepNodeType[], currentEdges: any[]) => {
+      if (!storageRootRef.current) {
+        return
+      }
+      try {
+        syncGraphToLiveblocks(currentNodes, currentEdges)
+      } catch (syncErr) {
+        console.warn("Could not sync nodes directly to Liveblocks:", syncErr)
+      }
+    },
+    [syncGraphToLiveblocks]
   )
 
   const handleRun = async () => {
@@ -459,33 +490,25 @@ function RunButton({ workflowId }: { workflowId?: string }) {
     const startedAt = new Date().toISOString()
     const startMs = Date.now()
 
-    // 2. Sync nodes & edges into Liveblocks
-    try {
-      syncGraphToLiveblocks(nodes, edges)
-    } catch (syncErr) {
-      console.warn("Could not sync nodes directly to Liveblocks:", syncErr)
-    }
+    // 2. Sync nodes & edges into Liveblocks (safe guarded)
+    safeSyncGraph(nodes, edges)
 
-    // 3. Populate QUEUED run state in Liveblocks
-    try {
-      populateRunInLiveblocks({
-        runId: null,
-        status: "QUEUED",
-        isCompleted: false,
-        isExecuting: false,
-        isQueued: true,
-        createdAt: startedAt,
-        startedAt,
-        finishedAt: null,
-        durationMs: null,
-        error: null,
-        output: null,
-        nodesCount: nodes.length,
-        edgesCount: edges.length,
-      })
-    } catch (lbErr) {
-      console.warn("Failed to set initial run in Liveblocks:", lbErr)
-    }
+    // 3. Populate QUEUED run state in Liveblocks (safe guarded)
+    safePopulateRun({
+      runId: null,
+      status: "QUEUED",
+      isCompleted: false,
+      isExecuting: false,
+      isQueued: true,
+      createdAt: startedAt,
+      startedAt,
+      finishedAt: null,
+      durationMs: null,
+      error: null,
+      output: null,
+      nodesCount: nodes.length,
+      edgesCount: edges.length,
+    })
 
     try {
       toast.info("Running workflow...")
@@ -499,7 +522,7 @@ function RunButton({ workflowId }: { workflowId?: string }) {
 
       // 5. Update Liveblocks with runId and begin polling Trigger.dev worker status
       if (result.id) {
-        populateRunInLiveblocks({
+        safePopulateRun({
           runId: result.id,
           status: "QUEUED",
           isCompleted: false,
@@ -520,7 +543,7 @@ function RunButton({ workflowId }: { workflowId?: string }) {
           pollCount++
           try {
             const runInfo = await getWorkflowRunStatusAction(result.id)
-            populateRunInLiveblocks({
+            safePopulateRun({
               runId: runInfo.id,
               status: runInfo.status,
               isCompleted: runInfo.isCompleted,
@@ -549,7 +572,7 @@ function RunButton({ workflowId }: { workflowId?: string }) {
         const finishedAt = new Date().toISOString()
         const durationMs = Date.now() - startMs
 
-        populateRunInLiveblocks({
+        safePopulateRun({
           runId: null,
           status: "COMPLETED",
           isCompleted: true,
@@ -572,25 +595,21 @@ function RunButton({ workflowId }: { workflowId?: string }) {
       const errorMsg = error?.message || "Failed to execute workflow"
       toast.error(errorMsg)
 
-      try {
-        populateRunInLiveblocks({
-          runId: null,
-          status: "FAILED",
-          isCompleted: true,
-          isExecuting: false,
-          isQueued: false,
-          createdAt: startedAt,
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          durationMs: Date.now() - startMs,
-          error: errorMsg,
-          output: null,
-          nodesCount: nodes.length,
-          edgesCount: edges.length,
-        })
-      } catch {
-        // ignore
-      }
+      safePopulateRun({
+        runId: null,
+        status: "FAILED",
+        isCompleted: true,
+        isExecuting: false,
+        isQueued: false,
+        createdAt: startedAt,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startMs,
+        error: errorMsg,
+        output: null,
+        nodesCount: nodes.length,
+        edgesCount: edges.length,
+      })
     } finally {
       setIsRunning(false)
     }
