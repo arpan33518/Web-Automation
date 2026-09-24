@@ -7,8 +7,15 @@ import { browserbase, localBrowser, Stagehand } from "@browserbasehq/stagehand"
 config({ path: ".env.local", override: true })
 
 import { getWorkflow } from "@/features/workflows/data"
+import { interpolate } from "@/features/workflows/lib"
+import { openUrl } from "@/features/workflows/nodes/open-url"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
+
+export type RunStep = {
+  id: string
+  status: "pending" | "running" | "done" | "failed"
+}
 
 /**
  * Computes topological execution order of workflow nodes based on directed edges.
@@ -123,11 +130,21 @@ export const runWorkflowTask = task({
 
     if (nodes.length === 0) {
       logger.log(`Workflow "${workflow.name}" has no nodes to execute.`)
-      return { steps: 0, executed: [] }
+      metadata.set("steps", [])
+      await metadata.flush()
+      return { steps: [] as RunStep[], executed: [] }
     }
 
     const nodeById = new Map<string, StepNodeType>(nodes.map((n) => [n.id, n]))
     const order = getExecutionOrder(nodes, edges)
+
+    // Build a list of the steps we're about to run - each starting at "pending"
+    const steps: RunStep[] = order.map((nodeId) => ({
+      id: nodeId,
+      status: "pending",
+    }))
+    metadata.set("steps", steps)
+    await metadata.flush()
 
     logger.log(`Running workflow "${workflow.name}"`, { totalSteps: order.length })
 
@@ -188,7 +205,13 @@ export const runWorkflowTask = task({
       return stagehand
     }
 
-    const executedSteps: Array<{ id: string; title: string; type: string }> = []
+    const executedSteps: Array<{
+      id: string
+      title: string
+      type: string
+      output?: unknown
+    }> = []
+    const nodeOutputs: Record<string, unknown> = {}
 
     try {
       for (const stepId of order) {
@@ -196,29 +219,78 @@ export const runWorkflowTask = task({
         if (node) {
           const stepType = node.data?.type ?? node.type ?? "step"
           const stepTitle = node.data?.title || stepType
-          const values = node.data?.values || {}
+          const rawValues = node.data?.values || {}
 
-          logger.log(`Running step: ${stepTitle} (${stepType})`, { stepId, values })
+          // Replace placeholders like {{ someNodeId.title }} with matching upstream node data
+          const values: Record<string, string> = Object.fromEntries(
+            Object.entries(rawValues).map(([key, val]) => [
+              key,
+              typeof val === "string" ? interpolate(val, nodeOutputs) : val,
+            ])
+          )
 
-          if (stepType === "open-url") {
-            const targetUrl = values.url || "https://example.com"
-            logger.log(`Action [open-url]: Navigating to ${targetUrl}`)
+          logger.log(`Running step: ${stepTitle} (${stepType})`, {
+            stepId,
+            values,
+            rawValues,
+          })
 
-            const sh = await getStagehand()
-            const [page] = await sh.browser.context.pages()
-            if (page) {
-              try {
-                await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 60_000 })
-              } catch (navErr) {
-                logger.warn(`Navigation to ${targetUrl} completed with notice:`, { error: navErr })
+          const currentStep = steps.find((s) => s.id === stepId)
+          if (currentStep) {
+            currentStep.status = "running"
+            metadata.set("steps", steps)
+            await metadata.flush()
+          }
+
+          let stepResult: unknown = null
+
+          try {
+            if (stepType === "open-url") {
+              const targetUrl = values.url || "https://example.com"
+              logger.log(`Action [open-url]: Navigating to ${targetUrl}`)
+
+              const sh = await getStagehand()
+              const result = await openUrl({
+                stagehand: sh,
+                url: targetUrl,
+              })
+
+              stepResult = {
+                ...result,
+                status: "success",
+              }
+            } else {
+              stepResult = {
+                type: stepType,
+                title: stepTitle,
+                values,
+                status: "success",
+                ...values,
               }
             }
+
+            if (currentStep) {
+              currentStep.status = "done"
+              metadata.set("steps", steps)
+            }
+          } catch (stepErr) {
+            logger.error(`Step "${stepTitle}" (${stepId}) failed:`, { error: stepErr })
+            if (currentStep) {
+              currentStep.status = "failed"
+              metadata.set("steps", steps)
+              await metadata.flush()
+            }
+            throw stepErr
           }
+
+          // Keep each node's output keyed by its ID for subsequent nodes to consume
+          nodeOutputs[stepId] = stepResult
 
           executedSteps.push({
             id: stepId,
             title: stepTitle,
             type: stepType,
+            output: stepResult,
           })
         }
       }
@@ -237,14 +309,14 @@ export const runWorkflowTask = task({
       } catch (err) {
         logger.warn("Error closing browser", { error: err })
       }
-
     }
 
     return {
       workflowId,
       name: workflow.name,
-      steps: executedSteps.length,
+      steps,
       executed: executedSteps,
+      outputs: nodeOutputs,
     }
   },
 })

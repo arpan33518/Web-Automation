@@ -41,6 +41,7 @@ import {
   type StepNodeKind,
   type StepNodeType,
 } from "@/features/workflows/nodes/node-registry"
+import { useUpstreamConnections } from "@/features/workflows/hooks"
 import {
   deleteWorkflowAction,
   getWorkflowRunStatusAction,
@@ -58,8 +59,17 @@ import { validateGraph } from "@/features/workflows/lib/validate-graph"
 // ---------------------------------------------------------------------------
 
 // The accent-colored icon chip, mirroring the node on the canvas.
-function NodeIcon({ type, className }: { type: NodeType; className?: string }) {
+function NodeIcon({
+  type,
+  className,
+  iconClassName,
+}: {
+  type: NodeType
+  className?: string
+  iconClassName?: string
+}) {
   const def = nodeRegistry[type]
+  if (!def) return null
   const Icon = def.icon
   return (
     <span
@@ -69,7 +79,7 @@ function NodeIcon({ type, className }: { type: NodeType; className?: string }) {
         className
       )}
     >
-      <Icon className="size-3.5" />
+      <Icon className={cn("size-3.5", iconClassName)} />
     </span>
   )
 }
@@ -104,17 +114,23 @@ function Field({
   field,
   value,
   onChange,
+  onFocus,
+  inputRef,
 }: {
   field: NodeField
   value: string
   onChange: (value: string) => void
+  onFocus?: () => void
+  inputRef?: (el: HTMLInputElement | HTMLTextAreaElement | null) => void
 }) {
   if (field.multiline) {
     return (
       <Textarea
         id={field.key}
+        ref={inputRef}
         value={value}
         placeholder={field.placeholder}
+        onFocus={onFocus}
         onChange={(e) => onChange(e.target.value)}
       />
     )
@@ -123,8 +139,10 @@ function Field({
   return (
     <Input
       id={field.key}
+      ref={inputRef}
       value={value}
       placeholder={field.placeholder}
+      onFocus={onFocus}
       onChange={(e) => onChange(e.target.value)}
     />
   )
@@ -133,6 +151,9 @@ function Field({
 // The Editor tab: one input per field on the selected node, or an empty state.
 function Inspector({ node }: { node: StepNodeType | undefined }) {
   const { setNodes } = useReactFlow<StepNodeType>()
+  const upstreamOutputs = useUpstreamConnections(node)
+  const [lastActiveField, setLastActiveField] = useState<string | null>(null)
+  const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({})
 
   const updateNodeInLiveblocks = useMutation(
     ({ storage }, nodeId: string, key: string, value: string) => {
@@ -195,6 +216,35 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
     }
   }
 
+  const handleInsertToken = (token: string) => {
+    const targetKey =
+      lastActiveField && def.fields.some((f) => f.key === lastActiveField)
+        ? lastActiveField
+        : def.fields[0]?.key
+
+    if (!targetKey) return
+
+    const inputEl = fieldRefs.current[targetKey]
+    const currentValue = values?.[targetKey] ?? ""
+
+    let nextValue: string
+    if (inputEl && typeof inputEl.selectionStart === "number") {
+      const start = inputEl.selectionStart
+      const end = inputEl.selectionEnd ?? start
+      nextValue = currentValue.slice(0, start) + token + currentValue.slice(end)
+
+      setTimeout(() => {
+        inputEl.focus()
+        const newPos = start + token.length
+        inputEl.setSelectionRange(newPos, newPos)
+      }, 0)
+    } else {
+      nextValue = currentValue ? `${currentValue} ${token}` : token
+    }
+
+    updateField(targetKey, nextValue)
+  }
+
   return (
     <Section title={title} icon={<NodeIcon type={type} />}>
       <div className="flex flex-col gap-3 p-3">
@@ -209,10 +259,40 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
               <Field
                 field={field}
                 value={values?.[field.key] ?? ""}
+                onFocus={() => setLastActiveField(field.key)}
+                inputRef={(el) => {
+                  fieldRefs.current[field.key] = el
+                }}
                 onChange={(value) => updateField(field.key, value)}
               />
             </div>
           ))
+        )}
+
+        {upstreamOutputs.length > 0 && (
+          <div className="flex flex-col gap-2 border-t border-border pt-3">
+            <span className="text-xs font-semibold text-muted-foreground">
+              Connections
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {upstreamOutputs.map((item) => (
+                <button
+                  key={`${item.nodeId}-${item.output.key}`}
+                  type="button"
+                  onClick={() => handleInsertToken(item.token)}
+                  title={`Insert ${item.token}`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 hover:bg-secondary px-2 py-1 text-xs text-foreground transition-colors cursor-pointer"
+                >
+                  <NodeIcon
+                    type={item.type}
+                    className="size-4 rounded-xs"
+                    iconClassName="size-2.5"
+                  />
+                  <span className="truncate max-w-[200px]">{item.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </Section>
