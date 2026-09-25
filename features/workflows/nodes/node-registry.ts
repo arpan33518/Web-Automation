@@ -1,5 +1,5 @@
 import type { Node } from "@xyflow/react"
-import { Globe, MousePointerClick, type LucideIcon } from "lucide-react"
+import { Eye, FileText, Globe, MousePointerClick, Sparkles, type LucideIcon } from "lucide-react"
 
 export type StepNodeKind = "trigger" | "action"
 
@@ -50,6 +50,105 @@ export const nodeRegistry = {
       { key: "url", label: "URL", description: "The final page URL" },
       { key: "title", label: "Page Title", description: "The title of the loaded page" },
       { key: "status", label: "Status", description: "Execution status" },
+    ],
+  },
+  act: {
+    type: "act",
+    kind: "action",
+    label: "Act",
+    icon: Sparkles,
+    accent: "bg-purple-500 text-white",
+    fields: [
+      {
+        key: "instruction",
+        label: "Instruction",
+        placeholder: "e.g. Click the sign in button or type in search",
+        multiline: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "worked",
+        label: "Worked",
+        description: "Whether the action worked",
+        type: "boolean",
+      },
+      {
+        key: "success",
+        label: "Success",
+        description: "Whether the action succeeded",
+        type: "boolean",
+      },
+      {
+        key: "message",
+        label: "Message",
+        description: "Action result message",
+        type: "string",
+      },
+      {
+        key: "url",
+        label: "Resulting URL",
+        description: "The page URL after the action",
+        type: "string",
+      },
+    ],
+  },
+  extract: {
+    type: "extract",
+    kind: "action",
+    label: "Extract",
+    icon: FileText,
+    accent: "bg-amber-500 text-white",
+    fields: [
+      {
+        key: "instruction",
+        label: "Instruction",
+        placeholder: "e.g. Extract the page title, main content, or product price",
+        multiline: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "result",
+        label: "Result",
+        description: "The extracted text or data from the page",
+        type: "string",
+      },
+    ],
+  },
+  observe: {
+    type: "observe",
+    kind: "action",
+    label: "Observe",
+    icon: Eye,
+    accent: "bg-sky-500 text-white",
+    fields: [
+      {
+        key: "instruction",
+        label: "Instruction",
+        placeholder: "e.g. Find the sign in button or search input",
+        multiline: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "matches",
+        label: "Matches",
+        description: "Matching actionable elements with selector and description",
+        type: "array",
+      },
+      {
+        key: "selector",
+        label: "Selector",
+        description: "Selector of the first matched element",
+        type: "string",
+      },
+      {
+        key: "description",
+        label: "Description",
+        description: "Description of the first matched element",
+        type: "string",
+      },
     ],
   },
 } satisfies Record<string, NodeDefinition>

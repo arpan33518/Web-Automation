@@ -8,7 +8,7 @@ config({ path: ".env.local", override: true })
 
 import { getWorkflow } from "@/features/workflows/data"
 import { interpolate } from "@/features/workflows/lib"
-import { openUrl } from "@/features/workflows/nodes/open-url"
+import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
@@ -245,14 +245,14 @@ export const runWorkflowTask = task({
           let stepResult: unknown = null
 
           try {
-            if (stepType === "open-url") {
-              const targetUrl = values.url || "https://example.com"
-              logger.log(`Action [open-url]: Navigating to ${targetUrl}`)
+            if (stepType in nodeExecutors) {
+              logger.log(`Action [${stepType}]: Executing`)
 
               const sh = await getStagehand()
-              const result = await openUrl({
+              const executor = nodeExecutors[stepType as keyof typeof nodeExecutors]
+              const result = await executor({
                 stagehand: sh,
-                url: targetUrl,
+                values,
               })
 
               stepResult = {
