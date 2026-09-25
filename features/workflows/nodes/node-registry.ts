@@ -1,5 +1,5 @@
 import type { Node } from "@xyflow/react"
-import { Eye, FileText, Globe, MousePointerClick, Sparkles, type LucideIcon } from "lucide-react"
+import { Bot, Eye, FileText, Globe, MousePointerClick, Sparkles, type LucideIcon } from "lucide-react"
 
 export type StepNodeKind = "trigger" | "action"
 
@@ -148,6 +148,41 @@ export const nodeRegistry = {
         label: "Description",
         description: "Description of the first matched element",
         type: "string",
+      },
+    ],
+  },
+  agent: {
+    type: "agent",
+    kind: "action",
+    label: "Agent",
+    icon: Bot,
+    accent: "bg-rose-500 text-white",
+    fields: [
+      {
+        key: "instruction",
+        label: "Instruction",
+        placeholder: "e.g. Search for items, add to cart, and proceed to checkout",
+        multiline: true,
+      },
+    ],
+    outputs: [
+      {
+        key: "success",
+        label: "Success",
+        description: "Whether the agent task succeeded",
+        type: "boolean",
+      },
+      {
+        key: "message",
+        label: "Message",
+        description: "Summary message of the execution",
+        type: "string",
+      },
+      {
+        key: "completed",
+        label: "Completed",
+        description: "Whether the agent task completed execution",
+        type: "boolean",
       },
     ],
   },

@@ -1,5 +1,6 @@
 import type { Stagehand } from "@browserbasehq/stagehand"
 import { act } from "@/features/workflows/nodes/act"
+import { agent } from "@/features/workflows/nodes/agent"
 import { extract } from "@/features/workflows/nodes/extract"
 import { observe } from "@/features/workflows/nodes/observe"
 import { openUrl } from "@/features/workflows/nodes/open-url"
@@ -45,6 +46,13 @@ export const nodeExecutors = {
       instruction: values.instruction || "",
     })
   },
+  agent: async ({ stagehand, values }) => {
+    return agent({
+      stagehand,
+      instruction: values.instruction || "",
+    })
+  },
 } satisfies Record<ActionNodeType, NodeExecutor>
+
 
 
