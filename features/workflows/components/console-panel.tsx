@@ -6,6 +6,11 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable"
 import { LogsPanel } from "@/features/workflows/components/logs-panel"
 import { InspectorPanel } from "@/features/workflows/components/inspector-panel"
 import {
@@ -86,31 +91,43 @@ export function ConsolePanel({ className }: ConsolePanelProps) {
         </div>
       </div>
 
-      {/* Main Console View: LogsPanel and optional InspectorPanel */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Runs List as LogsPanel */}
-        <div
-          className={cn(
-            "flex flex-col overflow-hidden transition-all duration-150",
-            selected ? "w-7/12 border-r border-border/60" : "w-full"
-          )}
+      {/* Main Console View: Horizontal Resizable Panel Group between Logs and Inspector */}
+      <div className="flex-1 overflow-hidden">
+        <ResizablePanelGroup
+          key={selected ? "with-inspector" : "logs-only"}
+          orientation="horizontal"
+          className="size-full"
         >
-          <LogsPanel
-            selectedStepKey={selectedStepKey}
-            onStepClick={handleStepClick}
-          />
-        </div>
-
-        {/* InspectorPanel: rendered next to logs ONLY while a step is selected */}
-        {selected && (
-          <div className="w-5/12 flex flex-col overflow-hidden bg-background">
-            <InspectorPanel
-              step={selected.step}
-              run={selected.run}
-              onClose={() => setSelected(null)}
+          {/* Runs List as LogsPanel */}
+          <ResizablePanel
+            defaultSize={selected ? 58 : 100}
+            minSize={30}
+            className="flex flex-col overflow-hidden"
+          >
+            <LogsPanel
+              selectedStepKey={selectedStepKey}
+              onStepClick={handleStepClick}
             />
-          </div>
-        )}
+          </ResizablePanel>
+
+          {/* InspectorPanel: rendered next to logs ONLY while a step is selected */}
+          {selected && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                defaultSize={42}
+                minSize={25}
+                className="flex flex-col overflow-hidden bg-background"
+              >
+                <InspectorPanel
+                  step={selected.step}
+                  run={selected.run}
+                  onClose={() => setSelected(null)}
+                />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
       </div>
     </div>
   )
