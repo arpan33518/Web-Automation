@@ -11,7 +11,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { RightSidebar } from "@/features/workflows/components/right-sidebar"
-import { WorkflowRunStatus } from "@/features/workflows/components/workflow-run-status"
+import { ConsolePanel } from "@/features/workflows/components/console-panel"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
 const WorkflowCanvas = dynamic(
@@ -70,14 +70,9 @@ export function WorkflowShell({ workflowId, initialGraph }: WorkflowShellProps) 
 
           <ResizableHandle />
 
-          {/* Bottom panel: logs / run execution */}
-          <ResizablePanel defaultSize="10rem" minSize="6rem" className="bg-background">
-            <div className="size-full overflow-y-auto p-3">
-              <WorkflowRunStatus
-                runState={liveRunState ?? null}
-                onReset={handleReset}
-              />
-            </div>
+          {/* Bottom panel: execution console */}
+          <ResizablePanel defaultSize="14rem" minSize="4rem" className="bg-background">
+            <ConsolePanel onReset={handleReset} />
           </ResizablePanel>
         </ResizablePanelGroup>
       </ResizablePanel>

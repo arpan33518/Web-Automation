@@ -39,6 +39,27 @@ export interface WorkflowRunsProviderProps {
 }
 
 /**
+ * Extracts steps from a run (preferring final output steps, falling back to live metadata steps).
+ */
+export function getRunSteps(run: WorkflowRun | null | undefined): RunStep[] {
+  if (!run) return []
+
+  // 1. Prefer final output steps once run completes
+  const output = run.output as { steps?: RunStep[] } | undefined
+  if (output && Array.isArray(output.steps) && output.steps.length > 0) {
+    return output.steps
+  }
+
+  // 2. Fall back to live metadata steps while run is running
+  const metadata = run.metadata as { steps?: RunStep[] } | undefined
+  if (metadata && Array.isArray(metadata.steps) && metadata.steps.length > 0) {
+    return metadata.steps
+  }
+
+  return []
+}
+
+/**
  * Client provider that subscribes to a workflow's runs in realtime by tag (`workflow:<id>`)
  * using a public access token passed in as a prop.
  *
@@ -85,25 +106,7 @@ export function WorkflowRunsProvider({
       Boolean((latestRun as any).isQueued)
     )
   }, [latestRun])
-
-  // Prefer the run's final output steps and fall back to live metadata steps
-  const steps: RunStep[] = useMemo(() => {
-    if (!latestRun) return []
-
-    // 1. Prefer final output steps once run completes
-    const output = latestRun.output as { steps?: RunStep[] } | undefined
-    if (output && Array.isArray(output.steps)) {
-      return output.steps
-    }
-
-    // 2. Fall back to live metadata steps while run is running
-    const metadata = latestRun.metadata as { steps?: RunStep[] } | undefined
-    if (metadata && Array.isArray(metadata.steps)) {
-      return metadata.steps
-    }
-
-    return []
-  }, [latestRun])
+  const steps: RunStep[] = useMemo(() => getRunSteps(latestRun), [latestRun])
 
   const contextValue = useMemo<WorkflowRunsContextValue>(
     () => ({

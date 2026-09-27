@@ -4,6 +4,7 @@ import { agent } from "@/features/workflows/nodes/agent"
 import { extract } from "@/features/workflows/nodes/extract"
 import { observe } from "@/features/workflows/nodes/observe"
 import { openUrl } from "@/features/workflows/nodes/open-url"
+import { sendEmail } from "@/features/workflows/nodes/send-email"
 import type { nodeRegistry } from "@/features/workflows/nodes/node-registry"
 
 export type ActionNodeType = {
@@ -50,6 +51,13 @@ export const nodeExecutors = {
     return agent({
       stagehand,
       instruction: values.instruction || "",
+    })
+  },
+  "send-email": async ({ values }) => {
+    return sendEmail({
+      to: values.to || "",
+      subject: values.subject || "",
+      body: values.body || "",
     })
   },
 } satisfies Record<ActionNodeType, NodeExecutor>

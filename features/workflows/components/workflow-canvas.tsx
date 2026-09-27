@@ -28,6 +28,7 @@ import { StepNode } from "@/features/workflows/components/step-nodes"
 import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
 
 import { useTheme } from "next-themes"
+import { toast } from "sonner"
 
 const nodeTypes: NodeTypes = { step: StepNode }
 
@@ -77,9 +78,12 @@ export function WorkflowCanvas({
   const colorMode: ColorMode = (resolvedTheme as ColorMode) ?? "system"
 
   const effectiveInitialNodes = React.useMemo(() => {
-    return (initialGraph?.nodes && initialGraph.nodes.length > 0)
+    const rawNodes = (initialGraph?.nodes && initialGraph.nodes.length > 0)
       ? (initialGraph.nodes as StepNodeType[])
       : defaultInitialNodes
+    return rawNodes.map((n) =>
+      n.data?.kind === "trigger" || n.id === "start" ? { ...n, deletable: false } : n
+    )
   }, [initialGraph])
 
   const effectiveInitialEdges = React.useMemo(() => {
@@ -105,8 +109,17 @@ export function WorkflowCanvas({
     },
   })
 
-  // Provide initial nodes immediately so the canvas renders instantly with zero delay
-  const displayNodes = nodes ?? effectiveInitialNodes
+  // Provide initial nodes immediately so the canvas renders instantly with zero delay,
+  // ensuring the trigger node cannot be marked as deletable.
+  const displayNodes = React.useMemo(() => {
+    const activeNodes = (nodes ?? effectiveInitialNodes) as StepNodeType[]
+    return activeNodes.map((node) =>
+      node.data?.kind === "trigger" || node.id === "start"
+        ? { ...node, deletable: false }
+        : node
+    )
+  }, [nodes, effectiveInitialNodes])
+
   const displayEdges = edges ?? effectiveInitialEdges
 
   const others = useOthers()
@@ -146,10 +159,46 @@ export function WorkflowCanvas({
     [isLoading, onConnect]
   )
 
+  const handleBeforeDelete = React.useCallback(
+    async ({ nodes: nodesToRemove, edges: edgesToRemove }: { nodes: any[]; edges: any[] }) => {
+      const hasTrigger = nodesToRemove.some(
+        (n) => n.data?.kind === "trigger" || n.id === "start"
+      )
+      if (hasTrigger) {
+        toast.error("The Start trigger node cannot be deleted.")
+        const allowableNodes = nodesToRemove.filter(
+          (n) => n.data?.kind !== "trigger" && n.id !== "start"
+        )
+        return {
+          nodes: allowableNodes,
+          edges: edgesToRemove,
+        }
+      }
+      return true
+    },
+    []
+  )
+
   const handleDelete = React.useCallback(
-    (...args: Parameters<typeof onDelete>) => {
+    (params: Parameters<typeof onDelete>[0]) => {
       if (isLoading) return
-      onDelete(...args)
+      const allowableNodes = (params.nodes as StepNodeType[]).filter(
+        (node) => node.data?.kind !== "trigger" && node.id !== "start"
+      )
+      if (
+        (params.nodes as StepNodeType[]).some(
+          (node) => node.data?.kind === "trigger" || node.id === "start"
+        )
+      ) {
+        toast.error("The Start trigger node cannot be deleted.")
+      }
+      if (allowableNodes.length === 0 && params.edges.length === 0) {
+        return
+      }
+      onDelete({
+        nodes: allowableNodes as any,
+        edges: params.edges,
+      })
     },
     [isLoading, onDelete]
   )
@@ -167,7 +216,9 @@ export function WorkflowCanvas({
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
         onConnect={handleConnect}
+        onBeforeDelete={handleBeforeDelete}
         onDelete={handleDelete}
+        deleteKeyCode={["Backspace", "Delete"]}
         nodesDraggable={!isLoading}
         nodesConnectable={!isLoading}
         elementsSelectable={!isLoading}

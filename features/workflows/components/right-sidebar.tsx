@@ -59,7 +59,7 @@ import { validateGraph } from "@/features/workflows/lib/validate-graph"
 // ---------------------------------------------------------------------------
 
 // The accent-colored icon chip, mirroring the node on the canvas.
-function NodeIcon({
+export function NodeIcon({
   type,
   className,
   iconClassName,
@@ -88,17 +88,22 @@ function NodeIcon({
 function Section({
   title,
   icon,
+  actions,
   children,
 }: {
   title: string
   icon?: React.ReactNode
+  actions?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-y border-border bg-card px-3 py-1.5 text-sm font-semibold">
-        {icon}
-        {title}
+      <div className="flex items-center justify-between border-y border-border bg-card px-3 py-1.5 text-sm font-semibold">
+        <div className="flex items-center gap-2 min-w-0">
+          {icon}
+          <span className="truncate">{title}</span>
+        </div>
+        {actions && <div className="flex items-center gap-1">{actions}</div>}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
     </div>
@@ -149,8 +154,14 @@ function Field({
 }
 
 // The Editor tab: one input per field on the selected node, or an empty state.
-function Inspector({ node }: { node: StepNodeType | undefined }) {
-  const { setNodes } = useReactFlow<StepNodeType>()
+function Inspector({
+  node,
+  onDeleted,
+}: {
+  node: StepNodeType | undefined
+  onDeleted?: () => void
+}) {
+  const { setNodes, deleteElements } = useReactFlow<StepNodeType>()
   const upstreamOutputs = useUpstreamConnections(node)
   const [lastActiveField, setLastActiveField] = useState<string | null>(null)
   const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({})
@@ -179,6 +190,28 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
     []
   )
 
+  const deleteNodeFromLiveblocks = useMutation(
+    ({ storage }, nodeId: string) => {
+      const flow = (storage as any).get("flow")
+      if (flow) {
+        const nodesMap = flow.get("nodes")
+        const edgesMap = flow.get("edges")
+        if (nodesMap) {
+          nodesMap.delete(nodeId)
+        }
+        if (edgesMap) {
+          for (const [edgeId, edge] of Array.from<[string, any]>(edgesMap.entries() as any)) {
+            const edgeVal = (edge as any)?.toObject ? (edge as any).toObject() : edge
+            if (edgeVal?.source === nodeId || edgeVal?.target === nodeId) {
+              edgesMap.delete(edgeId)
+            }
+          }
+        }
+      }
+    },
+    []
+  )
+
   if (!node) {
     return (
       <Section title="Editor">
@@ -189,6 +222,24 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
 
   const { type, title, values } = node.data
   const def: NodeDefinition = nodeRegistry[type]
+  const isTrigger = def?.kind === "trigger" || node.id === "start"
+
+  const handleDeleteNode = () => {
+    if (isTrigger) {
+      toast.error("The Start trigger node cannot be deleted.")
+      return
+    }
+
+    try {
+      deleteNodeFromLiveblocks(node.id)
+    } catch {
+      // Ignore if not yet connected to Liveblocks storage
+    }
+
+    deleteElements({ nodes: [{ id: node.id }] })
+    toast.success(`Deleted "${title}"`)
+    onDeleted?.()
+  }
 
   const updateField = (key: string, value: string) => {
     setNodes((nodes) =>
@@ -245,8 +296,20 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
     updateField(targetKey, nextValue)
   }
 
+  const headerActions = !isTrigger ? (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="size-6 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+      title="Delete step"
+      onClick={handleDeleteNode}
+    >
+      <Trash2 className="size-3.5" />
+    </Button>
+  ) : null
+
   return (
-    <Section title={title} icon={<NodeIcon type={type} />}>
+    <Section title={title} icon={<NodeIcon type={type} />} actions={headerActions}>
       <div className="flex flex-col gap-3 p-3">
         {def.fields.length === 0 ? (
           <p className="text-xs text-muted-foreground">No properties</p>
@@ -292,6 +355,26 @@ function Inspector({ node }: { node: StepNodeType | undefined }) {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {!isTrigger ? (
+          <div className="border-t border-border pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-center gap-2 text-destructive border-destructive/20 hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+              onClick={handleDeleteNode}
+            >
+              <Trash2 className="size-3.5" />
+              <span>Delete step</span>
+            </Button>
+          </div>
+        ) : (
+          <div className="border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground italic">
+              The Start trigger node cannot be deleted.
+            </p>
           </div>
         )}
       </div>
@@ -767,7 +850,7 @@ export function RightSidebar({ workflowId }: { workflowId?: string } = {}) {
           <Palette />
         </TabsContent>
         <TabsContent value="editor" className="flex min-h-0 flex-col">
-          <Inspector node={selected} />
+          <Inspector node={selected} onDeleted={() => setTab("toolbar")} />
         </TabsContent>
       </Tabs>
     </ResizablePanel>

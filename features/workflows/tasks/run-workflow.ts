@@ -14,7 +14,15 @@ import type { WorkflowGraph } from "@/lib/db/schema"
 
 export type RunStep = {
   id: string
+  nodeId?: string
+  nodeType: string
+  title: string
   status: "pending" | "running" | "done" | "failed"
+  durationMs?: number
+  startedAt?: string
+  completedAt?: string
+  output?: any
+  error?: string
 }
 
 /**
@@ -139,10 +147,18 @@ export const runWorkflowTask = task({
     const order = getExecutionOrder(nodes, edges)
 
     // Build a list of the steps we're about to run - each starting at "pending"
-    const steps: RunStep[] = order.map((nodeId) => ({
-      id: nodeId,
-      status: "pending",
-    }))
+    const steps: RunStep[] = order.map((nodeId) => {
+      const node = nodeById.get(nodeId)
+      const stepType = node?.data?.type ?? node?.type ?? "step"
+      const stepTitle = node?.data?.title || stepType
+      return {
+        id: nodeId,
+        nodeId,
+        nodeType: stepType,
+        title: stepTitle,
+        status: "pending",
+      }
+    })
     metadata.set("steps", steps)
     await metadata.flush()
 
@@ -197,8 +213,59 @@ export const runWorkflowTask = task({
         ctx.browser = browser
       }
 
+      const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+      const groqKey = process.env.GROQ_API_KEY
+      const openaiKey = process.env.OPENAI_API_KEY
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      const configuredModel = process.env.STAGEHAND_MODEL_NAME?.trim()
+
+      let stagehandModel: { modelName: any; apiKey: string } | undefined
+
+      if (configuredModel) {
+        if (configuredModel.startsWith("google/") && geminiKey) {
+          stagehandModel = { modelName: configuredModel as any, apiKey: geminiKey }
+        } else if (configuredModel.startsWith("groq/") && groqKey) {
+          stagehandModel = { modelName: configuredModel as any, apiKey: groqKey }
+        } else if (configuredModel.startsWith("openai/") && openaiKey) {
+          stagehandModel = { modelName: configuredModel as any, apiKey: openaiKey }
+        } else if (configuredModel.startsWith("anthropic/") && anthropicKey) {
+          stagehandModel = { modelName: configuredModel as any, apiKey: anthropicKey }
+        }
+      }
+
+      if (!stagehandModel) {
+        if (geminiKey) {
+          stagehandModel = {
+            modelName: "google/gemini-flash-latest" as any,
+            apiKey: geminiKey,
+          }
+        } else if (groqKey) {
+          stagehandModel = {
+            modelName: "groq/llama-3.1-8b-instant" as any,
+            apiKey: groqKey,
+          }
+        } else if (openaiKey) {
+          stagehandModel = {
+            modelName: "openai/gpt-4o-mini" as any,
+            apiKey: openaiKey,
+          }
+        } else if (anthropicKey) {
+          stagehandModel = {
+            modelName: "anthropic/claude-3-5-sonnet" as any,
+            apiKey: anthropicKey,
+          }
+        }
+      }
+
+      if (!stagehandModel) {
+        logger.warn(
+          "No LLM API key detected (OPENAI_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY). AI actions (act, observe, extract, agent) require an LLM to interact with the browser."
+        )
+      }
+
       stagehand = await Stagehand.create({
         browser,
+        ...(stagehandModel ? { model: stagehandModel } : {}),
         logging: { level: "info", format: "pretty" },
       })
 
@@ -236,8 +303,10 @@ export const runWorkflowTask = task({
           })
 
           const currentStep = steps.find((s) => s.id === stepId)
+          const stepStartTime = Date.now()
           if (currentStep) {
             currentStep.status = "running"
+            currentStep.startedAt = new Date(stepStartTime).toISOString()
             metadata.set("steps", steps)
             await metadata.flush()
           }
@@ -269,14 +338,24 @@ export const runWorkflowTask = task({
               }
             }
 
+            const durationMs = Date.now() - stepStartTime
             if (currentStep) {
               currentStep.status = "done"
+              currentStep.completedAt = new Date().toISOString()
+              currentStep.durationMs = durationMs
+              currentStep.output = stepResult
               metadata.set("steps", steps)
+              await metadata.flush()
             }
           } catch (stepErr) {
+            const durationMs = Date.now() - stepStartTime
+            const errorMessage = stepErr instanceof Error ? stepErr.message : String(stepErr)
             logger.error(`Step "${stepTitle}" (${stepId}) failed:`, { error: stepErr })
             if (currentStep) {
               currentStep.status = "failed"
+              currentStep.completedAt = new Date().toISOString()
+              currentStep.durationMs = durationMs
+              currentStep.error = errorMessage
               metadata.set("steps", steps)
               await metadata.flush()
             }
