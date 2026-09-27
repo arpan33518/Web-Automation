@@ -22,7 +22,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { NodeIcon } from "@/features/workflows/components/right-sidebar"
+import { NodeIcon } from "@/features/workflows/components/node-icon"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import {
   useWorkflowRuns,

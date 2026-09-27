@@ -9,13 +9,14 @@ config({ path: ".env.local", override: true })
 import { getWorkflow } from "@/features/workflows/data"
 import { interpolate } from "@/features/workflows/lib"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
-import type { StepNodeType } from "@/features/workflows/nodes/node-registry"
+import { nodeRegistry, type StepNodeType } from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
 export type RunStep = {
   id: string
   nodeId?: string
   nodeType: string
+  type?: string
   title: string
   status: "pending" | "running" | "done" | "failed"
   durationMs?: number
@@ -150,11 +151,16 @@ export const runWorkflowTask = task({
     const steps: RunStep[] = order.map((nodeId) => {
       const node = nodeById.get(nodeId)
       const stepType = node?.data?.type ?? node?.type ?? "step"
-      const stepTitle = node?.data?.title || stepType
+      const registryEntry =
+        stepType in nodeRegistry
+          ? nodeRegistry[stepType as keyof typeof nodeRegistry]
+          : null
+      const stepTitle = node?.data?.title || registryEntry?.label || stepType
       return {
         id: nodeId,
         nodeId,
         nodeType: stepType,
+        type: stepType,
         title: stepTitle,
         status: "pending",
       }
@@ -303,6 +309,30 @@ export const runWorkflowTask = task({
           })
 
           const currentStep = steps.find((s) => s.id === stepId)
+          const executor = nodeExecutors[stepType as keyof typeof nodeExecutors]
+
+          // Nodes with no executor (such as the start trigger) do no work and produce
+          // no output. Mark them done and publish to metadata before continuing.
+          if (!executor) {
+            logger.log(`Step "${stepTitle}" (${stepType}) has no executor — marking done`)
+            if (currentStep) {
+              currentStep.status = "done"
+              currentStep.completedAt = new Date().toISOString()
+              currentStep.durationMs = 0
+              currentStep.output = undefined
+              metadata.set("steps", steps)
+              await metadata.flush()
+            }
+            nodeOutputs[stepId] = {}
+            executedSteps.push({
+              id: stepId,
+              title: stepTitle,
+              type: stepType,
+              output: undefined,
+            })
+            continue
+          }
+
           const stepStartTime = Date.now()
           if (currentStep) {
             currentStep.status = "running"
@@ -314,28 +344,17 @@ export const runWorkflowTask = task({
           let stepResult: unknown = null
 
           try {
-            if (stepType in nodeExecutors) {
-              logger.log(`Action [${stepType}]: Executing`)
+            logger.log(`Action [${stepType}]: Executing`)
 
-              const sh = await getStagehand()
-              const executor = nodeExecutors[stepType as keyof typeof nodeExecutors]
-              const result = await executor({
-                stagehand: sh,
-                values,
-              })
+            const sh = await getStagehand()
+            const result = await executor({
+              stagehand: sh,
+              values,
+            })
 
-              stepResult = {
-                ...result,
-                status: "success",
-              }
-            } else {
-              stepResult = {
-                type: stepType,
-                title: stepTitle,
-                values,
-                status: "success",
-                ...values,
-              }
+            stepResult = {
+              ...result,
+              status: "success",
             }
 
             const durationMs = Date.now() - stepStartTime

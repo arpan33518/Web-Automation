@@ -16,7 +16,7 @@ import {
 
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
-import { NodeIcon } from "@/features/workflows/components/right-sidebar"
+import { NodeIcon } from "@/features/workflows/components/node-icon"
 import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import {
   useWorkflowRuns,
@@ -284,9 +284,10 @@ export function LogsPanel({
                               {stepIdx + 1}
                             </span>
 
-                            {/* Node icon reused from right-sidebar */}
+                            {/* Node icon with running spinner inside its colored chip */}
                             <NodeIcon
                               type={step.nodeType as NodeType}
+                              running={isRunning}
                               className={cn(
                                 "size-5 shrink-0",
                                 isFailed && "bg-rose-500/20 text-rose-400",
@@ -326,10 +327,7 @@ export function LogsPanel({
                               </span>
                             )}
 
-                            {/* Status: spins while running, red icon if failed, checkmark if done */}
-                            {isRunning && (
-                              <Loader2 className="size-3.5 animate-spin text-sky-400" />
-                            )}
+                            {/* Status: red icon if failed, checkmark if done, clock if pending */}
                             {isFailed && (
                               <AlertCircle className="size-3.5 text-rose-500" />
                             )}

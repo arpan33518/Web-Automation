@@ -3,6 +3,7 @@ export {
   WorkflowRunsProvider,
   useLatestRunSteps,
   useWorkflowRuns,
+  useAllWorkflowRunsWithSteps,
   getRunSteps,
 } from "@/features/workflows/components/workflow-runs-provider"
 export type {
@@ -10,4 +11,5 @@ export type {
   LatestRunStepsResult,
   WorkflowRunsContextValue,
   WorkflowRun,
+  RunWithSteps,
 } from "@/features/workflows/components/workflow-runs-provider"

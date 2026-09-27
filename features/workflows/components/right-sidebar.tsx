@@ -58,31 +58,7 @@ import { validateGraph } from "@/features/workflows/lib/validate-graph"
 // Shared pieces — used by both the Toolbar and the Editor.
 // ---------------------------------------------------------------------------
 
-// The accent-colored icon chip, mirroring the node on the canvas.
-export function NodeIcon({
-  type,
-  className,
-  iconClassName,
-}: {
-  type: NodeType
-  className?: string
-  iconClassName?: string
-}) {
-  const def = nodeRegistry[type]
-  if (!def) return null
-  const Icon = def.icon
-  return (
-    <span
-      className={cn(
-        "flex size-6 shrink-0 items-center justify-center rounded-md",
-        def.accent,
-        className
-      )}
-    >
-      <Icon className={cn("size-3.5", iconClassName)} />
-    </span>
-  )
-}
+export { NodeIcon } from "@/features/workflows/components/node-icon"
 
 // A titled, scrollable panel. Each tab renders its content inside one.
 function Section({
