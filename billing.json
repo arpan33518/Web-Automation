@@ -1,0 +1,17 @@
+{
+  "billing": {
+    "enabled": true,
+    "payer_types": ["org"],
+    "plans": [
+      {
+        "slug": "pro",
+        "name": "Pro",
+        "amount": 2000,
+        "currency": "usd",
+        "payer_type": "org",
+        "is_recurring": true,
+        "period": "month"
+      }
+    ]
+  }
+}

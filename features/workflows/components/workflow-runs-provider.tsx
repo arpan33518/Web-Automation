@@ -3,7 +3,10 @@
 import React, { createContext, useContext, useMemo } from "react"
 import { useRealtimeRunsWithTag } from "@trigger.dev/react-hooks"
 
-import type { RunStep, runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
+import type {
+  RunStep,
+  runWorkflowTask,
+} from "@/features/workflows/tasks/run-workflow"
 
 export type WorkflowRun = ReturnType<
   typeof useRealtimeRunsWithTag<typeof runWorkflowTask>
@@ -11,6 +14,7 @@ export type WorkflowRun = ReturnType<
 
 export interface LatestRunStepsResult {
   steps: RunStep[]
+  sessionId: string | null
   isLive: boolean
   run: WorkflowRun | null
 }
@@ -18,6 +22,7 @@ export interface LatestRunStepsResult {
 export interface RunWithSteps {
   run: WorkflowRun
   steps: RunStep[]
+  sessionId?: string | null
 }
 
 export interface WorkflowRunsContextValue {
@@ -30,6 +35,10 @@ export interface WorkflowRunsContextValue {
    */
   latestRun: WorkflowRun | null
   /**
+   * The Browserbase session ID of the latest run once finished (from final output)
+   */
+  sessionId: string | null
+  /**
    * The steps of the latest run
    */
   steps: RunStep[]
@@ -39,7 +48,7 @@ export interface WorkflowRunsContextValue {
   isLive: boolean
   error?: Error | null
   /**
-   * Every run paired with its parsed execution steps
+   * Every run paired with its parsed execution steps and session ID
    */
   runsWithSteps: RunWithSteps[]
   /**
@@ -47,9 +56,17 @@ export interface WorkflowRunsContextValue {
    */
   getRunSteps: (run: WorkflowRun | null | undefined) => RunStep[]
   /**
+   * Function to extract the Browserbase session ID from a run's final output
+   */
+  getRunSessionId: (run: WorkflowRun | null | undefined) => string | null
+  /**
    * Function to find a run by ID and get its steps
    */
   getStepsForRun: (runId: string) => RunStep[]
+  /**
+   * Function to find a run by ID and get its session ID
+   */
+  getSessionIdForRun: (runId: string) => string | null
 }
 
 const WorkflowRunsContext = createContext<WorkflowRunsContextValue | null>(null)
@@ -97,6 +114,51 @@ export function getRunSteps(run: WorkflowRun | null | undefined): RunStep[] {
   }
 
   return []
+}
+
+/**
+ * Extracts Browserbase session id from a finished run's final output.
+ * Does NOT read from live metadata because session recording lags session close.
+ */
+export function getRunSessionId(
+  run: WorkflowRun | null | undefined
+): string | null {
+  if (!run) return null
+
+  const parseJson = (val: unknown) => {
+    if (typeof val === "string") {
+      try {
+        return JSON.parse(val)
+      } catch {
+        return null
+      }
+    }
+    return val
+  }
+
+  // Strictly read from final output once the run has finished
+  const output = parseJson(run.output) as
+    { sessionId?: string; browserbaseSessionId?: string } | undefined
+
+  if (output) {
+    if (typeof output.sessionId === "string" && output.sessionId.length > 0) {
+      return output.sessionId
+    }
+    if (
+      typeof output.browserbaseSessionId === "string" &&
+      output.browserbaseSessionId.length > 0
+    ) {
+      return output.browserbaseSessionId
+    }
+  }
+
+  // Fallback to run metadata if present
+  const meta = run.metadata as
+    { browserbaseSessionId?: string; sessionId?: string } | undefined
+  if (meta?.browserbaseSessionId) return meta.browserbaseSessionId
+  if (meta?.sessionId) return meta.sessionId
+
+  return null
 }
 
 /**
@@ -150,11 +212,13 @@ export function WorkflowRunsProvider({
   }, [latestRun])
 
   const steps: RunStep[] = useMemo(() => getRunSteps(latestRun), [latestRun])
+  const sessionId = useMemo(() => getRunSessionId(latestRun), [latestRun])
 
   const runsWithSteps = useMemo<RunWithSteps[]>(() => {
     return sortedRuns.map((run) => ({
       run,
       steps: getRunSteps(run),
+      sessionId: getRunSessionId(run),
     }))
   }, [sortedRuns])
 
@@ -166,18 +230,39 @@ export function WorkflowRunsProvider({
     [sortedRuns]
   )
 
+  const getSessionIdForRun = React.useCallback(
+    (runId: string): string | null => {
+      const run = sortedRuns.find((r) => r.id === runId)
+      return getRunSessionId(run)
+    },
+    [sortedRuns]
+  )
+
   const contextValue = useMemo<WorkflowRunsContextValue>(
     () => ({
       runs: sortedRuns,
       latestRun,
+      sessionId,
       steps,
       isLive,
       error: error ?? null,
       runsWithSteps,
       getRunSteps,
+      getRunSessionId,
       getStepsForRun,
+      getSessionIdForRun,
     }),
-    [sortedRuns, latestRun, steps, isLive, error, runsWithSteps, getStepsForRun]
+    [
+      sortedRuns,
+      latestRun,
+      sessionId,
+      steps,
+      isLive,
+      error,
+      runsWithSteps,
+      getStepsForRun,
+      getSessionIdForRun,
+    ]
   )
 
   return (
@@ -197,6 +282,7 @@ export function useLatestRunSteps(): LatestRunStepsResult {
   if (!context) {
     return {
       steps: [],
+      sessionId: null,
       isLive: false,
       run: null,
     }
@@ -204,6 +290,7 @@ export function useLatestRunSteps(): LatestRunStepsResult {
 
   return {
     steps: context.steps,
+    sessionId: context.sessionId,
     isLive: context.isLive,
     run: context.latestRun,
   }
@@ -218,12 +305,15 @@ export function useWorkflowRuns(): WorkflowRunsContextValue {
     return {
       runs: [],
       latestRun: null,
+      sessionId: null,
       steps: [],
       isLive: false,
       error: null,
       runsWithSteps: [],
       getRunSteps,
+      getRunSessionId,
       getStepsForRun: () => [],
+      getSessionIdForRun: () => null,
     }
   }
   return context
@@ -239,13 +329,15 @@ export function useAllWorkflowRunsWithSteps() {
       runs: [] as WorkflowRun[],
       runsWithSteps: [] as RunWithSteps[],
       latestRun: null,
+      sessionId: null,
       steps: [] as RunStep[],
       isLive: false,
       error: null,
       getRunSteps,
+      getRunSessionId,
       getStepsForRun: () => [] as RunStep[],
+      getSessionIdForRun: () => null,
     }
   }
   return context
 }
-

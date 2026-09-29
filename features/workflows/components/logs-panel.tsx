@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock,
   ExternalLink,
+  Film,
   History,
   Loader2,
   Zap,
@@ -21,14 +22,17 @@ import type { NodeType } from "@/features/workflows/nodes/node-registry"
 import {
   useWorkflowRuns,
   getRunSteps,
+  getRunSessionId,
   type WorkflowRun,
 } from "@/features/workflows/components/workflow-runs-provider"
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
 
 export interface LogsPanelProps {
   className?: string
+  selectedKey?: string | null
   selectedStepKey?: string | null
   onStepClick?: (step: RunStep, run: WorkflowRun) => void
+  onReplayClick?: (run: WorkflowRun, sessionId: string) => void
 }
 
 function formatDuration(ms?: number | null): string {
@@ -99,11 +103,17 @@ function getRunStatusBadge(status?: string) {
 
 export function LogsPanel({
   className,
+  selectedKey,
   selectedStepKey,
   onStepClick,
+  onReplayClick,
 }: LogsPanelProps) {
   const { runs } = useWorkflowRuns()
-  const [expandedRuns, setExpandedRuns] = React.useState<Record<string, boolean>>({})
+  const [expandedRuns, setExpandedRuns] = React.useState<
+    Record<string, boolean>
+  >({})
+
+  const activeSelectedKey = selectedKey ?? selectedStepKey
 
   // Sort runs: latest first
   const sortedRuns = React.useMemo(() => {
@@ -141,7 +151,7 @@ export function LogsPanel({
 
   return (
     <div className={cn("flex flex-1 flex-col overflow-hidden", className)}>
-      <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/50 px-2.5 text-[11px] font-medium text-muted-foreground bg-muted/20">
+      <div className="flex h-7 shrink-0 items-center justify-between border-b border-border/50 bg-muted/20 px-2.5 text-[11px] font-medium text-muted-foreground">
         <span className="flex items-center gap-1">
           <History className="size-3" />
           Workflow Runs & Steps
@@ -149,7 +159,7 @@ export function LogsPanel({
         <span>{sortedRuns.length} runs</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto divide-y divide-border/40">
+      <div className="flex-1 divide-y divide-border/40 overflow-y-auto">
         {sortedRuns.map((run, idx) => {
           const runSteps = getRunSteps(run)
           const isExpanded = expandedRuns[run.id] !== false
@@ -167,20 +177,34 @@ export function LogsPanel({
             run.metadata as { browserbaseSessionUrl?: string } | undefined
           )?.browserbaseSessionUrl
 
+          const sessionId =
+            getRunSessionId(run) ||
+            (run.metadata as { browserbaseSessionId?: string } | undefined)
+              ?.browserbaseSessionId
+
+          const isFinished =
+            run.status === "COMPLETED" ||
+            run.status === "FAILED" ||
+            run.status === "CRASHED" ||
+            run.status === "TIMED_OUT" ||
+            Boolean(run.finishedAt)
+
+          const hasRecording = Boolean(sessionId && isFinished)
+
           return (
             <div key={run.id} className="flex flex-col bg-background/50">
               {/* Run Header Row */}
               <div
                 className={cn(
-                  "flex items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-muted/40 cursor-pointer border-b border-border/30",
+                  "flex cursor-pointer items-center justify-between border-b border-border/30 px-3 py-2 text-xs transition-colors hover:bg-muted/40",
                   run.status === "EXECUTING" && "bg-sky-500/5"
                 )}
                 onClick={() => toggleRunExpanded(run.id)}
               >
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
                   <button
                     type="button"
-                    className="text-muted-foreground hover:text-foreground shrink-0"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
                     onClick={(e) => {
                       e.stopPropagation()
                       toggleRunExpanded(run.id)
@@ -193,14 +217,14 @@ export function LogsPanel({
                     )}
                   </button>
 
-                  <span className="font-mono text-[11px] font-semibold text-foreground truncate">
+                  <span className="truncate font-mono text-[11px] font-semibold text-foreground">
                     Run {run.id.slice(0, 14)}...
                   </span>
 
                   <Badge
                     variant="outline"
                     className={cn(
-                      "px-1.5 py-0 text-[9px] font-semibold shrink-0 gap-1",
+                      "shrink-0 gap-1 px-1.5 py-0 text-[9px] font-semibold",
                       badge.className
                     )}
                   >
@@ -209,7 +233,27 @@ export function LogsPanel({
                   </Badge>
                 </div>
 
-                <div className="flex items-center gap-2.5 text-[10px] text-muted-foreground shrink-0 font-mono">
+                <div className="flex shrink-0 items-center gap-2.5 font-mono text-[10px] text-muted-foreground">
+                  {hasRecording && sessionId && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onReplayClick?.(run, sessionId)
+                      }}
+                      className={cn(
+                        "inline-flex items-center gap-1 hover:underline",
+                        activeSelectedKey === `${run.id}-replay`
+                          ? "font-semibold text-sky-300"
+                          : "text-sky-400 hover:text-sky-300"
+                      )}
+                      title="Watch session replay"
+                    >
+                      <Film className="size-2.5" />
+                      <span>Replay</span>
+                    </button>
+                  )}
+
                   {sessionUrl && (
                     <a
                       href={sessionUrl}
@@ -233,114 +277,157 @@ export function LogsPanel({
                   )}
 
                   <span className="text-muted-foreground/80">
-                    ({runSteps.length} {runSteps.length === 1 ? "step" : "steps"})
+                    ({runSteps.length}{" "}
+                    {runSteps.length === 1 ? "step" : "steps"})
                   </span>
                 </div>
               </div>
 
               {/* Below each run: its steps */}
               {isExpanded && (
-                <div className="py-1 px-2 space-y-1 bg-muted/15 border-b border-border/40">
-                  {runSteps.length === 0 ? (
-                    <div className="py-2 px-3 text-[11px] text-muted-foreground italic">
+                <div className="space-y-1 border-b border-border/40 bg-muted/15 px-2 py-1">
+                  {runSteps.length === 0 && !hasRecording ? (
+                    <div className="px-3 py-2 text-[11px] text-muted-foreground italic">
                       No steps recorded for this run.
                     </div>
                   ) : (
-                    runSteps.map((step, stepIdx) => {
-                      const stepKey = `${run.id}-${step.id}`
-                      const isSelected = selectedStepKey === stepKey
-                      const isRunning = step.status === "running"
-                      const isFailed = step.status === "failed"
-                      const isPending = step.status === "pending" || !step.status
-                      const isDone = step.status === "done"
+                    <>
+                      {runSteps.map((step, stepIdx) => {
+                        const stepKey = `${run.id}-${step.id}`
+                        const isSelected = activeSelectedKey === stepKey
+                        const isRunning = step.status === "running"
+                        const isFailed = step.status === "failed"
+                        const isPending =
+                          step.status === "pending" || !step.status
+                        const isDone = step.status === "done"
 
-                      const durationFormatted = formatDuration(step.durationMs)
+                        const durationFormatted = formatDuration(
+                          step.durationMs
+                        )
 
-                      return (
-                        <button
-                          key={step.id || stepIdx}
-                          type="button"
-                          onClick={() => onStepClick?.(step, run)}
-                          className={cn(
-                            "w-full text-left px-2.5 py-1.5 rounded-md transition-all cursor-pointer flex items-center justify-between gap-2 border text-xs",
-                            "border-border/40 bg-card/60 hover:bg-accent/50",
-                            // Clicking a step selects it, clicking again deselects
-                            isSelected &&
-                              "ring-1 ring-primary border-primary bg-accent font-medium shadow-xs",
-                            // A step spins while it's running
-                            isRunning &&
-                              "border-sky-500/40 bg-sky-500/10 text-sky-300 dark:bg-sky-500/15",
-                            // Turns red if it failed
-                            isFailed &&
-                              "border-rose-500/40 bg-rose-500/10 text-rose-400 dark:bg-rose-500/15",
-                            // Looks inactive if it never ran
-                            isPending &&
-                              "opacity-40 grayscale text-muted-foreground border-transparent bg-transparent hover:opacity-70"
-                          )}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {/* Step index */}
-                            <span className="text-[10px] font-mono text-muted-foreground/60 w-3 shrink-0">
-                              {stepIdx + 1}
-                            </span>
+                        return (
+                          <button
+                            key={step.id || stepIdx}
+                            type="button"
+                            onClick={() => onStepClick?.(step, run)}
+                            className={cn(
+                              "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-all",
+                              "border-border/40 bg-card/60 hover:bg-accent/50",
+                              // Clicking a step selects it, clicking again deselects
+                              isSelected &&
+                                "border-primary bg-accent font-medium shadow-xs ring-1 ring-primary",
+                              // A step spins while it's running
+                              isRunning &&
+                                "border-sky-500/40 bg-sky-500/10 text-sky-300 dark:bg-sky-500/15",
+                              // Turns red if it failed
+                              isFailed &&
+                                "border-rose-500/40 bg-rose-500/10 text-rose-400 dark:bg-rose-500/15",
+                              // Looks inactive if it never ran
+                              isPending &&
+                                "border-transparent bg-transparent text-muted-foreground opacity-40 grayscale hover:opacity-70"
+                            )}
+                          >
+                            <div className="flex min-w-0 items-center gap-2">
+                              {/* Step index */}
+                              <span className="w-3 shrink-0 font-mono text-[10px] text-muted-foreground/60">
+                                {stepIdx + 1}
+                              </span>
 
-                            {/* Node icon with running spinner inside its colored chip */}
-                            <NodeIcon
-                              type={step.nodeType as NodeType}
-                              running={isRunning}
-                              className={cn(
-                                "size-5 shrink-0",
-                                isFailed && "bg-rose-500/20 text-rose-400",
-                                isPending && "opacity-60"
-                              )}
-                              iconClassName={cn(
-                                "size-3",
-                                isFailed && "text-rose-400"
-                              )}
-                            />
+                              {/* Node icon with running spinner inside its colored chip */}
+                              <NodeIcon
+                                type={step.nodeType as NodeType}
+                                running={isRunning}
+                                className={cn(
+                                  "size-5 shrink-0",
+                                  isFailed && "bg-rose-500/20 text-rose-400",
+                                  isPending && "opacity-60"
+                                )}
+                                iconClassName={cn(
+                                  "size-3",
+                                  isFailed && "text-rose-400"
+                                )}
+                              />
 
-                            {/* Step title */}
-                            <span
-                              className={cn(
-                                "truncate text-xs font-medium",
-                                isFailed
-                                  ? "text-rose-400 dark:text-rose-300"
-                                  : "text-foreground"
-                              )}
-                            >
-                              {step.title || step.nodeType}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2 shrink-0">
-                            {/* Duration formatted with pretty-ms */}
-                            {durationFormatted && (
+                              {/* Step title */}
                               <span
                                 className={cn(
-                                  "font-mono text-[10px] tabular-nums",
+                                  "truncate text-xs font-medium",
                                   isFailed
-                                    ? "text-rose-400/80"
-                                    : "text-muted-foreground"
+                                    ? "text-rose-400 dark:text-rose-300"
+                                    : "text-foreground"
                                 )}
                               >
-                                {durationFormatted}
+                                {step.title || step.nodeType}
                               </span>
-                            )}
+                            </div>
 
-                            {/* Status: red icon if failed, checkmark if done, clock if pending */}
-                            {isFailed && (
-                              <AlertCircle className="size-3.5 text-rose-500" />
-                            )}
-                            {isDone && (
-                              <CheckCircle2 className="size-3.5 text-emerald-500" />
-                            )}
-                            {isPending && (
-                              <Clock className="size-3 text-muted-foreground/50" />
-                            )}
+                            <div className="flex shrink-0 items-center gap-2">
+                              {/* Duration formatted with pretty-ms */}
+                              {durationFormatted && (
+                                <span
+                                  className={cn(
+                                    "font-mono text-[10px] tabular-nums",
+                                    isFailed
+                                      ? "text-rose-400/80"
+                                      : "text-muted-foreground"
+                                  )}
+                                >
+                                  {durationFormatted}
+                                </span>
+                              )}
+
+                              {/* Status: red icon if failed, checkmark if done, clock if pending */}
+                              {isFailed && (
+                                <AlertCircle className="size-3.5 text-rose-500" />
+                              )}
+                              {isDone && (
+                                <CheckCircle2 className="size-3.5 text-emerald-500" />
+                              )}
+                              {isPending && (
+                                <Clock className="size-3 text-muted-foreground/50" />
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
+
+                      {/* Replay row: sits with step rows and is selectable */}
+                      {hasRecording && sessionId && (
+                        <button
+                          type="button"
+                          onClick={() => onReplayClick?.(run, sessionId)}
+                          className={cn(
+                            "flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-all",
+                            "border-border/40 bg-card/60 hover:bg-accent/50",
+                            activeSelectedKey === `${run.id}-replay` &&
+                              "border-primary bg-accent font-medium shadow-xs ring-1 ring-primary"
+                          )}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="w-3 shrink-0 font-mono text-[10px] text-muted-foreground/60">
+                              ▶
+                            </span>
+
+                            <div className="flex size-5 shrink-0 items-center justify-center rounded-md border border-sky-500/25 bg-sky-500/15 text-sky-400">
+                              <Film className="size-3" />
+                            </div>
+
+                            <span className="truncate text-xs font-medium text-foreground">
+                              Replay
+                            </span>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className="border-sky-500/30 bg-sky-500/10 px-1.5 py-0 text-[9px] font-semibold text-sky-400"
+                            >
+                              RECORDING
+                            </Badge>
                           </div>
                         </button>
-                      )
-                    })
+                      )}
+                    </>
                   )}
                 </div>
               )}

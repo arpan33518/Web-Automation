@@ -19,6 +19,10 @@ import {
 } from "@/features/workflows/components/workflow-runs-provider"
 import type { RunStep } from "@/features/workflows/tasks/run-workflow"
 
+export type ConsoleSelection =
+  | { type: "step"; step: RunStep; run: WorkflowRun }
+  | { type: "replay"; run: WorkflowRun; sessionId: string }
+
 export interface ConsolePanelProps {
   className?: string
   onReset?: () => void
@@ -27,24 +31,38 @@ export interface ConsolePanelProps {
 export function ConsolePanel({ className }: ConsolePanelProps) {
   const { latestRun, isLive } = useWorkflowRuns()
 
-  // ConsolePanel owns the selection
-  const [selected, setSelected] = React.useState<{
-    step: RunStep
-    run: WorkflowRun
-  } | null>(null)
+  // ConsolePanel owns the selection: either a step or a run's replay
+  const [selected, setSelected] = React.useState<ConsoleSelection | null>(null)
 
   // Clicking a step selects it, clicking again deselects
   const handleStepClick = (step: RunStep, run: WorkflowRun) => {
     setSelected((prev) => {
-      if (prev && prev.step.id === step.id && prev.run.id === run.id) {
+      if (
+        prev &&
+        prev.type === "step" &&
+        prev.step.id === step.id &&
+        prev.run.id === run.id
+      ) {
         return null
       }
-      return { step, run }
+      return { type: "step", step, run }
     })
   }
 
-  const selectedStepKey = selected
-    ? `${selected.run.id}-${selected.step.id}`
+  // Clicking a replay selects it, clicking again deselects
+  const handleReplayClick = (run: WorkflowRun, sessionId: string) => {
+    setSelected((prev) => {
+      if (prev && prev.type === "replay" && prev.run.id === run.id) {
+        return null
+      }
+      return { type: "replay", run, sessionId }
+    })
+  }
+
+  const selectedKey = selected
+    ? selected.type === "step"
+      ? `${selected.run.id}-${selected.step.id}`
+      : `${selected.run.id}-replay`
     : null
 
   return (
@@ -105,12 +123,14 @@ export function ConsolePanel({ className }: ConsolePanelProps) {
             className="flex flex-col overflow-hidden"
           >
             <LogsPanel
-              selectedStepKey={selectedStepKey}
+              selectedKey={selectedKey}
+              selectedStepKey={selectedKey}
               onStepClick={handleStepClick}
+              onReplayClick={handleReplayClick}
             />
           </ResizablePanel>
 
-          {/* InspectorPanel: rendered next to logs ONLY while a step is selected */}
+          {/* InspectorPanel: rendered next to logs ONLY while a step or replay is selected */}
           {selected && (
             <>
               <ResizableHandle withHandle />
@@ -119,11 +139,20 @@ export function ConsolePanel({ className }: ConsolePanelProps) {
                 minSize={25}
                 className="flex flex-col overflow-hidden bg-background"
               >
-                <InspectorPanel
-                  step={selected.step}
-                  run={selected.run}
-                  onClose={() => setSelected(null)}
-                />
+                {selected.type === "step" ? (
+                  <InspectorPanel
+                    step={selected.step}
+                    run={selected.run}
+                    onClose={() => setSelected(null)}
+                  />
+                ) : (
+                  <InspectorPanel
+                    isReplay
+                    sessionId={selected.sessionId}
+                    run={selected.run}
+                    onClose={() => setSelected(null)}
+                  />
+                )}
               </ResizablePanel>
             </>
           )}

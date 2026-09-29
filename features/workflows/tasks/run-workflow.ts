@@ -9,7 +9,10 @@ config({ path: ".env.local", override: true })
 import { getWorkflow } from "@/features/workflows/data"
 import { interpolate } from "@/features/workflows/lib"
 import { nodeExecutors } from "@/features/workflows/nodes/node-executors"
-import { nodeRegistry, type StepNodeType } from "@/features/workflows/nodes/node-registry"
+import {
+  nodeRegistry,
+  type StepNodeType,
+} from "@/features/workflows/nodes/node-registry"
 import type { WorkflowGraph } from "@/lib/db/schema"
 
 export type RunStep = {
@@ -35,14 +38,18 @@ function getExecutionOrder(nodes: StepNodeType[], edges: Edge[]): string[] {
   if (nodes.length === 0) return []
 
   const nodeIds = new Set(nodes.map((n) => n.id))
-  const validEdges = edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
+  const validEdges = edges.filter(
+    (e) => nodeIds.has(e.source) && nodeIds.has(e.target)
+  )
 
   // If there are no connections, run available nodes (triggers first)
   if (validEdges.length === 0) {
     return [...nodes]
       .sort((a, b) => {
-        const isA = a.data?.kind === "trigger" || a.data?.type === "start" ? 1 : 0
-        const isB = b.data?.kind === "trigger" || b.data?.type === "start" ? 1 : 0
+        const isA =
+          a.data?.kind === "trigger" || a.data?.type === "start" ? 1 : 0
+        const isB =
+          b.data?.kind === "trigger" || b.data?.type === "start" ? 1 : 0
         return isB - isA
       })
       .map((n) => n.id)
@@ -117,7 +124,9 @@ export const runWorkflowTask = task({
 
     const workflow = await getWorkflow(orgId, workflowId)
     if (!workflow) {
-      throw new Error(`Workflow "${workflowId}" not found for organization "${orgId}"`)
+      throw new Error(
+        `Workflow "${workflowId}" not found for organization "${orgId}"`
+      )
     }
 
     const rawGraph: unknown = workflow.graph
@@ -127,7 +136,9 @@ export const runWorkflowTask = task({
       try {
         graph = JSON.parse(rawGraph) as WorkflowGraph
       } catch (parseError) {
-        logger.warn("Failed to parse workflow graph JSON", { error: parseError })
+        logger.warn("Failed to parse workflow graph JSON", {
+          error: parseError,
+        })
         graph = { nodes: [], edges: [] }
       }
     } else if (rawGraph && typeof rawGraph === "object") {
@@ -168,9 +179,12 @@ export const runWorkflowTask = task({
     metadata.set("steps", steps)
     await metadata.flush()
 
-    logger.log(`Running workflow "${workflow.name}"`, { totalSteps: order.length })
+    logger.log(`Running workflow "${workflow.name}"`, {
+      totalSteps: order.length,
+    })
 
     let stagehand: Stagehand | null = null
+    let browserbaseSessionId: string | undefined = undefined
     const ctx: {
       browser: { close?: () => Promise<void>; context?: any } | null
     } = {
@@ -192,8 +206,10 @@ export const runWorkflowTask = task({
           })
           ctx.browser = browser
 
-          const sessionId = (browser as unknown as { sessionId?: string }).sessionId
+          const sessionId = (browser as unknown as { sessionId?: string })
+            .sessionId
           if (sessionId) {
+            browserbaseSessionId = sessionId
             const sessionUrl = `https://browserbase.com/sessions/${sessionId}`
             logger.log(`Browserbase Session Started: ${sessionId}`)
             logger.log(`Session Dashboard & Video: ${sessionUrl}`)
@@ -213,7 +229,7 @@ export const runWorkflowTask = task({
         }
       } else {
         logger.warn(
-          "BROWSERBASE_API_KEY is not set — falling back to local Chrome browser. Cloud session video will NOT be available.",
+          "BROWSERBASE_API_KEY is not set — falling back to local Chrome browser. Cloud session video will NOT be available."
         )
         browser = await localBrowser.launch({ headless: true })
         ctx.browser = browser
@@ -229,13 +245,25 @@ export const runWorkflowTask = task({
 
       if (configuredModel) {
         if (configuredModel.startsWith("google/") && geminiKey) {
-          stagehandModel = { modelName: configuredModel as any, apiKey: geminiKey }
+          stagehandModel = {
+            modelName: configuredModel as any,
+            apiKey: geminiKey,
+          }
         } else if (configuredModel.startsWith("groq/") && groqKey) {
-          stagehandModel = { modelName: configuredModel as any, apiKey: groqKey }
+          stagehandModel = {
+            modelName: configuredModel as any,
+            apiKey: groqKey,
+          }
         } else if (configuredModel.startsWith("openai/") && openaiKey) {
-          stagehandModel = { modelName: configuredModel as any, apiKey: openaiKey }
+          stagehandModel = {
+            modelName: configuredModel as any,
+            apiKey: openaiKey,
+          }
         } else if (configuredModel.startsWith("anthropic/") && anthropicKey) {
-          stagehandModel = { modelName: configuredModel as any, apiKey: anthropicKey }
+          stagehandModel = {
+            modelName: configuredModel as any,
+            apiKey: anthropicKey,
+          }
         }
       }
 
@@ -314,7 +342,9 @@ export const runWorkflowTask = task({
           // Nodes with no executor (such as the start trigger) do no work and produce
           // no output. Mark them done and publish to metadata before continuing.
           if (!executor) {
-            logger.log(`Step "${stepTitle}" (${stepType}) has no executor — marking done`)
+            logger.log(
+              `Step "${stepTitle}" (${stepType}) has no executor — marking done`
+            )
             if (currentStep) {
               currentStep.status = "done"
               currentStep.completedAt = new Date().toISOString()
@@ -368,8 +398,11 @@ export const runWorkflowTask = task({
             }
           } catch (stepErr) {
             const durationMs = Date.now() - stepStartTime
-            const errorMessage = stepErr instanceof Error ? stepErr.message : String(stepErr)
-            logger.error(`Step "${stepTitle}" (${stepId}) failed:`, { error: stepErr })
+            const errorMessage =
+              stepErr instanceof Error ? stepErr.message : String(stepErr)
+            logger.error(`Step "${stepTitle}" (${stepId}) failed:`, {
+              error: stepErr,
+            })
             if (currentStep) {
               currentStep.status = "failed"
               currentStep.completedAt = new Date().toISOString()
@@ -412,6 +445,8 @@ export const runWorkflowTask = task({
     return {
       workflowId,
       name: workflow.name,
+      sessionId: browserbaseSessionId,
+      browserbaseSessionId,
       steps,
       executed: executedSteps,
       outputs: nodeOutputs,

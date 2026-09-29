@@ -17,8 +17,12 @@ export async function extract({ stagehand, instruction }: ExtractParams) {
     extractResult = await stagehand.extract(
       instruction,
       z.object({
-        data: z.any().describe("The extracted data, values, or text matching the instruction"),
-      })
+        data: z
+          .any()
+          .describe(
+            "The extracted data, values, or text matching the instruction"
+          ),
+      }) as any
     )
   } catch {
     extractResult = await (stagehand as any).extract(instruction)
@@ -28,11 +32,11 @@ export async function extract({ stagehand, instruction }: ExtractParams) {
   const extraction =
     typeof rawData === "string"
       ? rawData
-      : (rawData as any)?.data ??
+      : ((rawData as any)?.data ??
         (rawData as any)?.extraction ??
         (typeof rawData === "object" && rawData !== null
           ? JSON.stringify(rawData)
-          : String(rawData ?? ""))
+          : String(rawData ?? "")))
 
   return {
     result: extraction,

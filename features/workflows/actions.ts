@@ -13,7 +13,11 @@ import {
 } from "@/features/workflows/data"
 import type { WorkflowGraph } from "@/lib/db/schema"
 import { generateSlug } from "@/features/workflows/lib/generate-slug"
-import { liveblocks, markRoomEnsured, unmarkRoomEnsured } from "@/lib/liveblocks"
+import {
+  liveblocks,
+  markRoomEnsured,
+  unmarkRoomEnsured,
+} from "@/lib/liveblocks"
 import type { runWorkflowTask } from "@/features/workflows/tasks/run-workflow"
 
 export async function createWorkflowAction(name?: string) {
@@ -38,7 +42,10 @@ export async function createWorkflowAction(name?: string) {
     })
     markRoomEnsured(workflow.id)
   } catch (error) {
-    console.error(`Failed to pre-create Liveblocks room for ${workflow.id}:`, error)
+    console.error(
+      `Failed to pre-create Liveblocks room for ${workflow.id}:`,
+      error
+    )
   }
 
   revalidatePath("/", "layout")
@@ -71,19 +78,23 @@ export async function runWorkflowAction(payload?: {
   graph?: WorkflowGraph
   message?: string
 }) {
-  const { orgId } = await auth()
+  const { orgId, has } = await auth()
 
   const id = payload?.id ?? payload?.workflowId
-  const graph = payload?.graph
+  let graph = payload?.graph
 
-  console.log("\n==================================================================")
+  console.log(
+    "\n=================================================================="
+  )
   console.log(`🚀 [SERVER TERMINAL] WORKFLOW RUN TRIGGERED`)
   console.log(`⏰ Timestamp : ${new Date().toLocaleTimeString()}`)
   console.log(`🆔 Workflow ID: ${id ?? "unknown"}`)
   console.log(`🏢 Org ID     : ${orgId ?? "none"}`)
   console.log(`📦 Nodes (${graph?.nodes?.length ?? 0}):`)
   graph?.nodes?.forEach((node, i) => {
-    console.log(`   [${i + 1}] ID: ${node.id} | Title: "${node.data?.title}" | Type: ${node.data?.type} (${node.data?.kind})`)
+    console.log(
+      `   [${i + 1}] ID: ${node.id} | Title: "${node.data?.title}" | Type: ${node.data?.type} (${node.data?.kind})`
+    )
     if (node.data?.values && Object.keys(node.data.values).length > 0) {
       console.log(`       Values:`, JSON.stringify(node.data.values))
     }
@@ -92,7 +103,9 @@ export async function runWorkflowAction(payload?: {
   graph?.edges?.forEach((edge, i) => {
     console.log(`   [${i + 1}] ${edge.source} ──▶ ${edge.target}`)
   })
-  console.log("------------------------------------------------------------------")
+  console.log(
+    "------------------------------------------------------------------"
+  )
 
   if (id) {
     if (!orgId) {
@@ -115,6 +128,24 @@ export async function runWorkflowAction(payload?: {
       if (!workflow) {
         throw new Error("Workflow not found")
       }
+      graph = (workflow.graph as WorkflowGraph) ?? undefined
+    }
+  }
+
+  const nodes = graph?.nodes ?? []
+  const edges = graph?.edges ?? []
+
+  // Plan check: Stop execution if workflow contains an Agent node unless the organization is on the Pro plan
+  const hasAgentNode = nodes.some(
+    (node) => node.data?.type === "agent" || node.type === "agent"
+  )
+
+  if (hasAgentNode) {
+    const isPro = Boolean(has({ plan: "pro" }) || has({ plan: "org:pro" }))
+    if (!isPro) {
+      throw new Error(
+        "The Agent node is a premium feature. Please upgrade your organization to the Pro plan to run this workflow."
+      )
     }
   }
 
@@ -127,9 +158,6 @@ export async function runWorkflowAction(payload?: {
     output?: unknown
   }> = []
 
-  const nodes = graph?.nodes ?? []
-  const edges = graph?.edges ?? []
-
   if (nodes.length > 0) {
     console.log(`⚙️ Executing workflow steps in topological flow...`)
     const nodeMap = new Map(nodes.map((n) => [n.id, n]))
@@ -141,8 +169,9 @@ export async function runWorkflowAction(payload?: {
     }
 
     const startNode =
-      nodes.find((n) => n.data?.kind === "trigger" || n.data?.type === "start") ??
-      nodes[0]
+      nodes.find(
+        (n) => n.data?.kind === "trigger" || n.data?.type === "start"
+      ) ?? nodes[0]
     const queue: string[] = startNode ? [startNode.id] : []
     const visited = new Set<string>()
 
@@ -211,19 +240,27 @@ export async function runWorkflowAction(payload?: {
     executedAt: new Date().toISOString(),
   }
 
-  console.log(`🎉 [WORKFLOW FINISHED] Successfully executed ${stepResults.length} step(s)!`)
-  console.log("==================================================================\n")
+  console.log(
+    `🎉 [WORKFLOW FINISHED] Successfully executed ${stepResults.length} step(s)!`
+  )
+  console.log(
+    "==================================================================\n"
+  )
 
   let triggerHandleId: string | null = null
   let publicAccessToken: string | undefined = undefined
 
   try {
     if (!id || !orgId) {
-      console.error(`❌ [TRIGGER.DEV] Missing parameters: workflowId=${id}, orgId=${orgId}`)
+      console.error(
+        `❌ [TRIGGER.DEV] Missing parameters: workflowId=${id}, orgId=${orgId}`
+      )
       throw new Error(`Missing workflowId or orgId for Trigger.dev task`)
     }
 
-    console.log(`[TRIGGER.DEV] Sending task to Trigger.dev: "run-workflow" (workflowId: ${id}, orgId: ${orgId})...`)
+    console.log(
+      `[TRIGGER.DEV] Sending task to Trigger.dev: "run-workflow" (workflowId: ${id}, orgId: ${orgId})...`
+    )
     const handle = await tasks.trigger<typeof runWorkflowTask>(
       "run-workflow",
       {
@@ -239,10 +276,17 @@ export async function runWorkflowAction(payload?: {
     )
     triggerHandleId = handle.id
     publicAccessToken = handle.publicAccessToken
-    console.log(`⚡ [TRIGGER.DEV] Successfully enqueued task with tags: [${id}, workflow:${id}]! Run ID: ${handle.id}`)
+    console.log(
+      `⚡ [TRIGGER.DEV] Successfully enqueued task with tags: [${id}, workflow:${id}]! Run ID: ${handle.id}`
+    )
   } catch (triggerError: any) {
-    console.error(`❌ [TRIGGER.DEV] FAILED to trigger task:`, triggerError?.message || triggerError)
-    throw new Error(`Trigger.dev failed: ${triggerError?.message || "Could not connect to Trigger.dev"}`)
+    console.error(
+      `❌ [TRIGGER.DEV] FAILED to trigger task:`,
+      triggerError?.message || triggerError
+    )
+    throw new Error(
+      `Trigger.dev failed: ${triggerError?.message || "Could not connect to Trigger.dev"}`
+    )
   }
 
   return {
@@ -291,14 +335,17 @@ export async function getWorkflowRunStatusAction(
       isQueued: Boolean(run.isQueued),
       createdAt: run.createdAt ? new Date(run.createdAt).toISOString() : null,
       startedAt: run.startedAt ? new Date(run.startedAt).toISOString() : null,
-      finishedAt: run.finishedAt ? new Date(run.finishedAt).toISOString() : null,
+      finishedAt: run.finishedAt
+        ? new Date(run.finishedAt).toISOString()
+        : null,
       durationMs: typeof run.durationMs === "number" ? run.durationMs : null,
       error: run.error?.message ?? null,
       output: run.output ?? null,
       tags: run.tags ?? [],
     }
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to retrieve run status"
+    const message =
+      error instanceof Error ? error.message : "Failed to retrieve run status"
     console.error("Failed to retrieve run status:", error)
     return {
       id: runId,
@@ -315,5 +362,3 @@ export async function getWorkflowRunStatusAction(
     }
   }
 }
-
-

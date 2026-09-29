@@ -10,7 +10,7 @@ import {
 } from "@xyflow/react"
 import { useMutation, useStorageRoot } from "@liveblocks/react"
 import { LiveObject } from "@liveblocks/client"
-import { Loader2, MoreHorizontal, Play, Trash2 } from "lucide-react"
+import { Loader2, Lock, MoreHorizontal, Play, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import {
@@ -41,7 +41,7 @@ import {
   type StepNodeKind,
   type StepNodeType,
 } from "@/features/workflows/nodes/node-registry"
-import { useUpstreamConnections } from "@/features/workflows/hooks"
+import { usePro, useUpstreamConnections } from "@/features/workflows/hooks"
 import {
   deleteWorkflowAction,
   getWorkflowRunStatusAction,
@@ -54,11 +54,8 @@ import { validateGraph } from "@/features/workflows/lib/validate-graph"
 // adding nodes and an Editor for tweaking the selected node. Each helper below is
 // defined just above the block that uses it.
 
-// ---------------------------------------------------------------------------
-// Shared pieces — used by both the Toolbar and the Editor.
-// ---------------------------------------------------------------------------
-
-export { NodeIcon } from "@/features/workflows/components/node-icon"
+import { NodeIcon } from "@/features/workflows/components/node-icon"
+export { NodeIcon }
 
 // A titled, scrollable panel. Each tab renders its content inside one.
 function Section({
@@ -75,7 +72,7 @@ function Section({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between border-y border-border bg-card px-3 py-1.5 text-sm font-semibold">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
           {icon}
           <span className="truncate">{title}</span>
         </div>
@@ -140,7 +137,9 @@ function Inspector({
   const { setNodes, deleteElements } = useReactFlow<StepNodeType>()
   const upstreamOutputs = useUpstreamConnections(node)
   const [lastActiveField, setLastActiveField] = useState<string | null>(null)
-  const fieldRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({})
+  const fieldRefs = useRef<
+    Record<string, HTMLInputElement | HTMLTextAreaElement | null>
+  >({})
 
   const updateNodeInLiveblocks = useMutation(
     ({ storage }, nodeId: string, key: string, value: string) => {
@@ -176,8 +175,12 @@ function Inspector({
           nodesMap.delete(nodeId)
         }
         if (edgesMap) {
-          for (const [edgeId, edge] of Array.from<[string, any]>(edgesMap.entries() as any)) {
-            const edgeVal = (edge as any)?.toObject ? (edge as any).toObject() : edge
+          for (const [edgeId, edge] of Array.from<[string, any]>(
+            edgesMap.entries() as any
+          )) {
+            const edgeVal = (edge as any)?.toObject
+              ? (edge as any).toObject()
+              : edge
             if (edgeVal?.source === nodeId || edgeVal?.target === nodeId) {
               edgesMap.delete(edgeId)
             }
@@ -276,7 +279,7 @@ function Inspector({
     <Button
       variant="ghost"
       size="icon"
-      className="size-6 text-muted-foreground hover:bg-destructive/15 hover:text-destructive cursor-pointer"
+      className="size-6 cursor-pointer text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
       title="Delete step"
       onClick={handleDeleteNode}
     >
@@ -285,7 +288,11 @@ function Inspector({
   ) : null
 
   return (
-    <Section title={title} icon={<NodeIcon type={type} />} actions={headerActions}>
+    <Section
+      title={title}
+      icon={<NodeIcon type={type} />}
+      actions={headerActions}
+    >
       <div className="flex flex-col gap-3 p-3">
         {def.fields.length === 0 ? (
           <p className="text-xs text-muted-foreground">No properties</p>
@@ -320,14 +327,14 @@ function Inspector({
                   type="button"
                   onClick={() => handleInsertToken(item.token)}
                   title={`Insert ${item.token}`}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/50 hover:bg-secondary px-2 py-1 text-xs text-foreground transition-colors cursor-pointer"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border bg-secondary/50 px-2 py-1 text-xs text-foreground transition-colors hover:bg-secondary"
                 >
                   <NodeIcon
                     type={item.type}
                     className="size-4 rounded-xs"
                     iconClassName="size-2.5"
                   />
-                  <span className="truncate max-w-[200px]">{item.label}</span>
+                  <span className="max-w-[200px] truncate">{item.label}</span>
                 </button>
               ))}
             </div>
@@ -339,7 +346,7 @@ function Inspector({
             <Button
               variant="outline"
               size="sm"
-              className="w-full justify-center gap-2 text-destructive border-destructive/20 hover:bg-destructive/10 hover:text-destructive cursor-pointer"
+              className="w-full cursor-pointer justify-center gap-2 border-destructive/20 text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={handleDeleteNode}
             >
               <Trash2 className="size-3.5" />
@@ -374,7 +381,9 @@ const definitions = Object.values(nodeRegistry)
 // The Toolbar tab: a button per node type that adds it to the canvas.
 function Palette() {
   const store = useStoreApi()
-  const { screenToFlowPosition, getNodes, setNodes } = useReactFlow<StepNodeType>()
+  const { screenToFlowPosition, getNodes, setNodes } =
+    useReactFlow<StepNodeType>()
+  const { isPro, redirectToPricing } = usePro()
 
   const addNodeToLiveblocks = useMutation(
     ({ storage }, newNode: StepNodeType) => {
@@ -390,18 +399,27 @@ function Palette() {
   )
 
   const add = (type: NodeType) => {
+    if (type === "agent" && !isPro) {
+      redirectToPricing()
+      return
+    }
+
     const def = nodeRegistry[type]
     const existingNodes = getNodes()
 
     if (def.kind === "trigger") {
-      const hasTrigger = existingNodes.some((node) => node.data?.kind === "trigger")
+      const hasTrigger = existingNodes.some(
+        (node) => node.data?.kind === "trigger"
+      )
       if (hasTrigger) {
         toast.error("Only a single trigger node is allowed")
         return
       }
     }
 
-    const sameTypeNodes = existingNodes.filter((node) => node.data?.type === type)
+    const sameTypeNodes = existingNodes.filter(
+      (node) => node.data?.type === type
+    )
     const regex = new RegExp(`^${def.label}\\s+(\\d+)$`)
     let maxNum = 0
     for (const n of sameTypeNodes) {
@@ -414,7 +432,9 @@ function Palette() {
     const count = Math.max(sameTypeNodes.length + 1, maxNum + 1)
     const title = def.kind === "trigger" ? def.label : `${def.label} ${count}`
 
-    const domNode = store.getState().domNode ?? document.querySelector<HTMLElement>(".react-flow")
+    const domNode =
+      store.getState().domNode ??
+      document.querySelector<HTMLElement>(".react-flow")
     const rect = domNode?.getBoundingClientRect()
     const centerScreen = rect
       ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
@@ -464,17 +484,37 @@ function Palette() {
             <AccordionContent className="flex flex-col gap-0.5">
               {definitions
                 .filter((def) => def.kind === section.kind)
-                .map((def) => (
-                  <Button
-                    key={def.type}
-                    variant="ghost"
-                    onClick={() => add(def.type as NodeType)}
-                    className="justify-start gap-2.5 px-1.5 text-xs"
-                  >
-                    <NodeIcon type={def.type as NodeType} />
-                    {def.label}
-                  </Button>
-                ))}
+                .map((def) => {
+                  const isLocked = def.type === "agent" && !isPro
+
+                  return (
+                    <Button
+                      key={def.type}
+                      variant="ghost"
+                      onClick={() => {
+                        if (isLocked) {
+                          redirectToPricing()
+                          return
+                        }
+                        add(def.type as NodeType)
+                      }}
+                      className={cn(
+                        "w-full justify-start gap-2.5 px-1.5 text-xs",
+                        isLocked &&
+                          "text-muted-foreground/80 hover:text-foreground"
+                      )}
+                    >
+                      <NodeIcon type={def.type as NodeType} />
+                      <span className="flex-1 text-left">{def.label}</span>
+                      {isLocked && (
+                        <span className="flex items-center gap-1 rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-500">
+                          <Lock className="size-2.5" />
+                          Pro
+                        </span>
+                      )}
+                    </Button>
+                  )
+                })}
             </AccordionContent>
           </AccordionItem>
         ))}
@@ -493,7 +533,8 @@ function ActionsMenu({ workflowId }: { workflowId?: string }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
-  const id = workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
+  const id =
+    workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
 
   const handleDelete = () => {
     if (!id || isPending) return
@@ -549,17 +590,15 @@ function RunButton({ workflowId }: { workflowId?: string }) {
   const [isRunning, setIsRunning] = useState(false)
   const { getNodes, getEdges } = useReactFlow<StepNodeType>()
 
-  const id = workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
+  const id =
+    workflowId ?? (typeof params?.id === "string" ? params.id : undefined)
   const [storageRoot] = useStorageRoot()
   const storageRootRef = useRef(storageRoot)
   storageRootRef.current = storageRoot
 
-  const populateRunInLiveblocks = useMutation(
-    ({ storage }, runData: any) => {
-      ;(storage as any).set("lastRun", new LiveObject(runData))
-    },
-    []
-  )
+  const populateRunInLiveblocks = useMutation(({ storage }, runData: any) => {
+    ;(storage as any).set("lastRun", new LiveObject(runData))
+  }, [])
 
   const syncGraphToLiveblocks = useMutation(
     ({ storage }, currentNodes: StepNodeType[], currentEdges: any[]) => {
@@ -691,7 +730,7 @@ function RunButton({ workflowId }: { workflowId?: string }) {
               createdAt: runInfo.createdAt ?? startedAt,
               startedAt: runInfo.startedAt ?? startedAt,
               finishedAt: runInfo.finishedAt,
-              durationMs: runInfo.durationMs ?? (Date.now() - startMs),
+              durationMs: runInfo.durationMs ?? Date.now() - startMs,
               error: runInfo.error,
               output: runInfo.output ?? result.output,
               nodesCount: nodes.length,
